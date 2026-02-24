@@ -1,0 +1,11 @@
+[package]
+name = "lvast"
+version = "0.1.0"
+edition = "2024"
+authors = ["Valerio Faiuolo <valeriof.dev@tuta.com>"]
+
+[dependencies]
+
+[build-dependencies]
+bindgen = "0.72.1"
+
