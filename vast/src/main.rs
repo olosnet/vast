@@ -1,12 +1,16 @@
+use lvast::cameras::traits::VastCameraDriver as _;
+
 fn main() {
-    let version_str = unsafe {
+    let mut camera_driver = lvast::cameras::svb::SVBVastCameraDriver::new();
+    println!("SVB SDK Version: {}", camera_driver.get_version());
 
-        let version = lvast::bindings::svb::SVBGetSDKVersion();
+    let cameras = camera_driver.init().unwrap_or_else(|e| {
+        eprintln!("Failed to initialize camera driver: {}", e);
+        std::process::exit(1);
+    });
 
-        std::ffi::CStr::from_ptr(version)
-            .to_str()
-            .unwrap_or("unknown")
-    };
-
-    println!("SVB SDK Version: {}", version_str);
+    println!("Found {} cameras", cameras.len());
+    for camera in cameras.iter() {
+        println!("Camera: {} ({})", camera.name, camera.id);
+    }
 }
