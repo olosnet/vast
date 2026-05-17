@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::base::errors::{VastError, VastErrorType};
 use crate::cameras::types::{
@@ -11,7 +11,9 @@ use crate::cameras::types::{
     VastCameraInfo, VastCameraSettings, VastCameraStreamingPreview,
 };
 
-pub struct SVBVastCameraDriver;
+pub struct SVBVastCameraDriver {
+    sdk_lock: Mutex<()>,
+}
 
 impl From<crate::drivers::bindings::svb::SVB_BAYER_PATTERN> for CameraBayerPattern {
     fn from(pattern: crate::drivers::bindings::svb::SVB_BAYER_PATTERN) -> Self {
@@ -113,10 +115,17 @@ fn svb_control_type_to_string(control_type: u32) -> &'static str {
 
 impl VastCameraDriver for SVBVastCameraDriver {
     fn new() -> Self {
-        Self
+        Self {
+            sdk_lock: Mutex::new(()),
+        }
     }
 
     fn init(&mut self) -> Result<Vec<VastCameraInfo>, VastError> {
+        let _guard = self.sdk_lock.lock().map_err(|_| VastError {
+            error_type: VastErrorType::CameraDriverError,
+            message: "SVB SDK lock poisoned".to_string(),
+        })?;
+
         unsafe {
             let connected_cameras = crate::drivers::bindings::svb::SVBGetNumOfConnectedCameras();
 
@@ -173,6 +182,8 @@ impl VastCameraDriver for SVBVastCameraDriver {
     }
 
     fn get_version(&self) -> &str {
+        let _guard = self.sdk_lock.lock().unwrap_or_else(|e| e.into_inner());
+
         unsafe {
             let version = crate::drivers::bindings::svb::SVBGetSDKVersion();
 
@@ -185,6 +196,7 @@ impl VastCameraDriver for SVBVastCameraDriver {
 
 pub struct SvbVastCamera {
     _driver: Arc<SVBVastCameraDriver>,
+    camera_lock: Arc<Mutex<()>>,
     camera_controls: HashMap<u32, crate::drivers::bindings::svb::SVB_CONTROL_CAPS>,
 
     camera_id: Option<i32>,
@@ -301,6 +313,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
     fn new(driver: Arc<SVBVastCameraDriver>) -> Self {
         Self {
             _driver: driver,
+            camera_lock: Arc::new(Mutex::new(())),
             camera_controls: HashMap::new(),
             camera_id: None,
             camera_name: String::new(),
@@ -314,7 +327,13 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
         log::info!("Opening SVB camera: {}", camera_id);
 
         unsafe {
-            let mut result = crate::drivers::bindings::svb::SVBOpenCamera(camera_id);
+            let result = {
+                let _guard = self._driver.sdk_lock.lock().map_err(|_| VastError {
+                    error_type: VastErrorType::CameraDriverError,
+                    message: "SVB SDK lock poisoned".to_string(),
+                })?;
+                crate::drivers::bindings::svb::SVBOpenCamera(camera_id)
+            };
             if result != 0 {
                 return Err(VastError {
                     error_type: VastErrorType::CameraDriverError,
@@ -323,6 +342,11 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
             }
 
             self.camera_id = Some(camera_id);
+            let camera_lock = Arc::clone(&self.camera_lock);
+            let _guard = camera_lock.lock().map_err(|_| VastError {
+                error_type: VastErrorType::CameraDriverError,
+                message: "SVB camera lock poisoned".to_string(),
+            })?;
             let mut camera_info = crate::drivers::bindings::svb::SVB_CAMERA_INFO {
                 FriendlyName: [0; 32usize],
                 CameraSN: [0; 32usize],
@@ -330,7 +354,8 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                 DeviceID: 0,
                 CameraID: 0,
             };
-            result = crate::drivers::bindings::svb::SVBGetCameraInfo(&mut camera_info, camera_id);
+            let mut result =
+                crate::drivers::bindings::svb::SVBGetCameraInfo(&mut camera_info, camera_id);
             if result == 0 {
                 self.camera_name = std::ffi::CStr::from_ptr(camera_info.FriendlyName.as_ptr())
                     .to_str()
@@ -837,6 +862,10 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
     fn disconnect(&mut self) -> Result<(), VastError> {
         if let Some(camera_id) = self.camera_id.take() {
+            let _guard = self._driver.sdk_lock.lock().map_err(|_| VastError {
+                error_type: VastErrorType::CameraDriverError,
+                message: "SVB SDK lock poisoned".to_string(),
+            })?;
             let result = unsafe { crate::drivers::bindings::svb::SVBCloseCamera(camera_id) };
             svb_result(result, "SVBCloseCamera failed")?;
         }
@@ -849,6 +878,7 @@ impl VastCameraAcquireImage for SvbVastCamera {
     fn start_image_acquisition(&mut self) -> Result<(), VastError> {
         let camera_id = self.open_camera_id()?;
 
+        let _guard = self.sdk_guard()?;
         let result = unsafe {
             crate::drivers::bindings::svb::SVBSetCameraMode(
                 camera_id,
@@ -866,6 +896,7 @@ impl VastCameraAcquireImage for SvbVastCamera {
 
     fn abort_image_acquisition(&mut self) -> Result<(), VastError> {
         let camera_id = self.open_camera_id()?;
+        let _guard = self.sdk_guard()?;
         let result = unsafe { crate::drivers::bindings::svb::SVBStopVideoCapture(camera_id) };
         svb_result(result, "SVBStopVideoCapture failed")
     }
@@ -884,6 +915,7 @@ impl VastCameraGuide for SvbVastCamera {
         duration_millis: u32,
     ) -> Result<(), VastError> {
         let camera_id = self.open_camera_id()?;
+        let _guard = self.sdk_guard()?;
         let result = unsafe {
             crate::drivers::bindings::svb::SVBPulseGuide(
                 camera_id,
@@ -898,6 +930,7 @@ impl VastCameraGuide for SvbVastCamera {
 impl VastCameraStreamingPreview for SvbVastCamera {
     fn start_streaming_preview(&mut self) -> Result<(), VastError> {
         let camera_id = self.open_camera_id()?;
+        let _guard = self.sdk_guard()?;
         let result = unsafe {
             crate::drivers::bindings::svb::SVBSetCameraMode(
                 camera_id,
@@ -919,12 +952,20 @@ impl VastCameraStreamingPreview for SvbVastCamera {
 
     fn stop_streaming_preview(&mut self) -> Result<(), VastError> {
         let camera_id = self.open_camera_id()?;
+        let _guard = self.sdk_guard()?;
         let result = unsafe { crate::drivers::bindings::svb::SVBStopVideoCapture(camera_id) };
         svb_result(result, "SVBStopVideoCapture failed")
     }
 }
 
 impl SvbVastCamera {
+    fn sdk_guard(&self) -> Result<MutexGuard<'_, ()>, VastError> {
+        self.camera_lock.lock().map_err(|_| VastError {
+            error_type: VastErrorType::CameraDriverError,
+            message: "SVB camera lock poisoned".to_string(),
+        })
+    }
+
     fn open_camera_id(&self) -> Result<i32, VastError> {
         self.camera_id.ok_or_else(|| VastError {
             error_type: VastErrorType::CameraError,
@@ -935,6 +976,7 @@ impl SvbVastCamera {
     fn current_image_format(&self) -> Result<CameraFrameFormat, VastError> {
         let camera_id = self.open_camera_id()?;
         let mut image_type = 0;
+        let _guard = self.sdk_guard()?;
         let result = unsafe {
             crate::drivers::bindings::svb::SVBGetOutputImageType(camera_id, &mut image_type)
         };
@@ -947,6 +989,7 @@ impl SvbVastCamera {
         let (.., width, height, _) = self.get_current_roi_parts()?;
         let format = self.current_image_format()?;
         let mut data = vec![0; frame_size_bytes(width, height, format)];
+        let _guard = self.sdk_guard()?;
         let result = unsafe {
             crate::drivers::bindings::svb::SVBGetVideoData(
                 camera_id,
@@ -987,6 +1030,7 @@ impl SvbVastCamera {
 
         let mut value = 0;
         let mut auto = 0;
+        let _guard = self.sdk_guard()?;
         let result = unsafe {
             crate::drivers::bindings::svb::SVBGetControlValue(
                 camera_id,
@@ -1028,6 +1072,7 @@ impl SvbVastCamera {
                 ),
             ));
 
+        let _guard = self.sdk_guard()?;
         let result = unsafe {
             crate::drivers::bindings::svb::SVBSetControlValue(
                 camera_id,
@@ -1057,6 +1102,7 @@ impl SvbVastCamera {
             return Ok(());
         };
 
+        let _guard = self.sdk_guard()?;
         let result = unsafe {
             crate::drivers::bindings::svb::SVBSetROIFormat(
                 camera_id,
@@ -1080,6 +1126,7 @@ impl SvbVastCamera {
         let mut width = 0;
         let mut height = 0;
         let mut bin = 0;
+        let _guard = self.sdk_guard()?;
         let result = unsafe {
             crate::drivers::bindings::svb::SVBGetROIFormat(
                 camera_id,

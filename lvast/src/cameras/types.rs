@@ -325,7 +325,7 @@ impl Default for VastCameraCapabilities {
     }
 }
 
-pub trait VastCameraDriver {
+pub trait VastCameraDriver: Send + Sync {
     fn new() -> Self;
     fn init(&mut self) -> Result<Vec<VastCameraInfo>, VastError>;
     fn id(&self) -> &str;
@@ -333,7 +333,7 @@ pub trait VastCameraDriver {
     fn get_version(&self) -> &str;
 }
 
-pub trait VastCamera<IDT, T: VastCameraDriver> {
+pub trait VastCamera<IDT, T: VastCameraDriver>: Send + Sync {
     fn new(driver: Arc<T>) -> Self;
 
     fn connect(&mut self, camera_id: IDT) -> Result<(), VastError>;
@@ -352,13 +352,13 @@ pub trait VastCamera<IDT, T: VastCameraDriver> {
     fn disconnect(&mut self) -> Result<(), VastError>;
 }
 
-pub trait VastCameraAcquireImage {
+pub trait VastCameraAcquireImage: Send + Sync {
     fn start_image_acquisition(&mut self) -> Result<(), VastError>;
     fn abort_image_acquisition(&mut self) -> Result<(), VastError>;
     fn get_acquired_image(&mut self, timeout_millis: u32) -> Result<VastCameraFrame, VastError>;
 }
 
-pub trait VastCameraGuide {
+pub trait VastCameraGuide: Send + Sync {
     fn pulse_guide(
         &mut self,
         direction: VastCameraGuideDirection,
@@ -366,7 +366,7 @@ pub trait VastCameraGuide {
     ) -> Result<(), VastError>;
 }
 
-pub trait VastCameraStreamingPreview {
+pub trait VastCameraStreamingPreview: Send + Sync {
     fn start_streaming_preview(&mut self) -> Result<(), VastError>;
     fn get_streaming_preview_frame(
         &mut self,

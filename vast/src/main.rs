@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, thread};
 
 use lvast::cameras::{
     svb::SvbVastCamera,
@@ -27,63 +27,73 @@ fn main() {
     println!("Found {} cameras", cameras.len());
     let camera_driver = Arc::new(camera_driver);
 
-    for camera in cameras.iter() {
-        println!("Camera: {} ({})", camera.name, camera.id);
+    let mut handles = Vec::new();
+    for camera in cameras {
+        let camera_driver = Arc::clone(&camera_driver);
+        handles.push(thread::spawn(move || {
+            println!("Camera: {} ({})", camera.name, camera.id);
 
-        println!("Connecting...");
+            println!("Connecting...");
 
-        let mut connected_camera = SvbVastCamera::new(Arc::clone(&camera_driver));
-        if let Err(e) = connected_camera.connect(camera.id.clone().into()) {
-            eprintln!("Failed to connect to camera: {}", e);
-            continue;
-        }
+            let mut connected_camera = SvbVastCamera::new(Arc::clone(&camera_driver));
+            if let Err(e) = connected_camera.connect(camera.id.clone().into()) {
+                eprintln!("Failed to connect to camera: {}", e);
+                return;
+            }
 
-        println!("Connected");
-        let capabilities = connected_camera.get_capabilities();
-        println!("{}", capabilities.fancy_info_str());
+            println!("Connected");
+            let capabilities = connected_camera.get_capabilities();
+            println!("{}", capabilities.fancy_info_str());
 
-        match connected_camera.get_camera_settings() {
-            Ok(mut settings) => {
-                println!("{}", settings.fancy_info_str());
+            match connected_camera.get_camera_settings() {
+                Ok(mut settings) => {
+                    println!("{}", settings.fancy_info_str());
 
-                let mut planned_changes = Vec::new();
-                if let Some(gain) = &capabilities.gain {
-                    let value = nearby_test_value(settings.gain, gain.min, gain.max);
-                    settings.gain = Some(value);
-                    planned_changes.push(format!(
-                        "gain={} -> {} (range {}..{})",
-                        connected_camera.get_settings().gain.unwrap_or(0),
-                        value,
-                        gain.min,
-                        gain.max
-                    ));
-                }
-                if let Some(offset) = &capabilities.offset {
-                    let value = nearby_test_value(settings.offset, offset.min, offset.max);
-                    settings.offset = Some(value);
-                    planned_changes.push(format!(
-                        "offset={} -> {} (range {}..{})",
-                        connected_camera.get_settings().offset.unwrap_or(0),
-                        value,
-                        offset.min,
-                        offset.max
-                    ));
-                }
+                    let mut planned_changes = Vec::new();
+                    if let Some(gain) = &capabilities.gain {
+                        let value = nearby_test_value(settings.gain, gain.min, gain.max);
+                        settings.gain = Some(value);
+                        planned_changes.push(format!(
+                            "gain={} -> {} (range {}..{})",
+                            connected_camera.get_settings().gain.unwrap_or(0),
+                            value,
+                            gain.min,
+                            gain.max
+                        ));
+                    }
+                    if let Some(offset) = &capabilities.offset {
+                        let value = nearby_test_value(settings.offset, offset.min, offset.max);
+                        settings.offset = Some(value);
+                        planned_changes.push(format!(
+                            "offset={} -> {} (range {}..{})",
+                            connected_camera.get_settings().offset.unwrap_or(0),
+                            value,
+                            offset.min,
+                            offset.max
+                        ));
+                    }
 
-                if settings.gain.is_some() || settings.offset.is_some() {
-                    println!("Setting test gain/offset: {}", planned_changes.join(", "));
-                    if let Err(e) = connected_camera.set_camera_settings(settings) {
-                        eprintln!("Failed to set camera settings: {}", e);
-                    } else if let Ok(settings) = connected_camera.get_camera_settings() {
-                        println!("Settings after test set:\n{}", settings.fancy_info_str());
+                    if settings.gain.is_some() || settings.offset.is_some() {
+                        println!("Setting test gain/offset: {}", planned_changes.join(", "));
+                        if let Err(e) = connected_camera.set_camera_settings(settings) {
+                            eprintln!("Failed to set camera settings: {}", e);
+                        } else if let Ok(settings) = connected_camera.get_camera_settings() {
+                            println!("Settings after test set:\n{}", settings.fancy_info_str());
+                        }
                     }
                 }
+                Err(e) => eprintln!("Failed to retrieve camera settings: {}", e),
             }
-            Err(e) => eprintln!("Failed to retrieve camera settings: {}", e),
-        }
 
-        connected_camera.disconnect().unwrap_or_else(|e| {
-            eprintln!("Failed to disconnect from camera: {}", e);
-        });
+            connected_camera.disconnect().unwrap_or_else(|e| {
+                eprintln!("Failed to disconnect from camera: {}", e);
+            });
+        }));
+    }
+
+    for handle in handles {
+        if handle.join().is_err() {
+            eprintln!("Camera worker thread panicked");
+        }
     }
 }
