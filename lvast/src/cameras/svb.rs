@@ -3,9 +3,10 @@ use std::sync::Arc;
 
 use crate::base::errors::{VastError, VastErrorType};
 use crate::cameras::types::{
-    CameraBayerPattern, CameraFrameFormat, VastCamera, VastCameraCapabilities, VastCameraCooler,
-    VastCameraDriver, VastCameraGain, VastCameraID, VastCameraInfo, VastCameraOffset,
-    fancy_info_str,
+    fancy_info_str, CameraBayerPattern, CameraFrameFormat, VastCamera, VastCameraCapBinning,
+    VastCameraCapCooler, VastCameraCapExposure, VastCameraCapGain, VastCameraCapGuide,
+    VastCameraCapOffset, VastCameraCapRoi, VastCameraCapRoiCombination, VastCameraCapabilities,
+    VastCameraDriver, VastCameraID, VastCameraInfo,
 };
 
 pub struct SVBVastCameraDriver;
@@ -179,7 +180,45 @@ fn control_range(control: &crate::drivers::bindings::svb::SVB_CONTROL_CAPS) -> O
 }
 
 fn control_step(min: u32, max: u32) -> u32 {
-    if max > min { 1 } else { 0 }
+    if max > min {
+        1
+    } else {
+        0
+    }
+}
+
+fn exposure_range_microseconds(
+    control: &crate::drivers::bindings::svb::SVB_CONTROL_CAPS,
+) -> Option<(u64, u64)> {
+    Some((
+        u64::try_from(control.MinValue).ok()?,
+        u64::try_from(control.MaxValue).ok()?,
+    ))
+}
+
+fn supported_bins(bins: &[std::os::raw::c_int]) -> Vec<u32> {
+    bins.iter()
+        .take_while(|bin| **bin != 0)
+        .filter_map(|bin| u32::try_from(*bin).ok())
+        .collect()
+}
+
+fn roi_combinations(
+    max_width: u32,
+    max_height: u32,
+    bins: &[u32],
+) -> Vec<VastCameraCapRoiCombination> {
+    bins.iter()
+        .copied()
+        .filter(|bin| *bin > 0)
+        .map(|bin| VastCameraCapRoiCombination {
+            bin,
+            max_width: max_width / bin,
+            max_height: max_height / bin,
+            width_step: 8,
+            height_step: 2,
+        })
+        .collect()
 }
 
 fn svb_result(result: i32, message: &str) -> Result<(), VastError> {
@@ -275,7 +314,32 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
             self.camera_capabilities.max_height = p_camera_property.MaxHeight as u32;
             self.camera_capabilities.max_width = p_camera_property.MaxWidth as u32;
+            self.camera_capabilities.adc_bits = p_camera_property.MaxBitDepth as u32;
             self.camera_is_trigger_cam = p_camera_property.IsTriggerCam == 1;
+
+            let bins = supported_bins(&p_camera_property.SupportedBins);
+            if !bins.is_empty() {
+                self.camera_capabilities.roi = Some(VastCameraCapRoi {
+                    combinations: roi_combinations(
+                        self.camera_capabilities.max_width,
+                        self.camera_capabilities.max_height,
+                        &bins,
+                    ),
+                });
+                self.camera_capabilities.binning = Some(VastCameraCapBinning { modes: bins });
+            }
+
+            let mut p_camera_property_ex =
+                std::mem::zeroed::<crate::drivers::bindings::svb::SVB_CAMERA_PROPERTY_EX>();
+            result = crate::drivers::bindings::svb::SVBGetCameraPropertyEx(
+                camera_id,
+                &mut p_camera_property_ex,
+            );
+            if result == 0 {
+                self.camera_capabilities.guide = Some(VastCameraCapGuide {
+                    pulse_guide: p_camera_property_ex.bSupportPulseGuide != 0,
+                });
+            }
 
             for format in p_camera_property.SupportedVideoFormat.iter() {
                 if *format == crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_END {
@@ -332,9 +396,18 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                     .insert(p_control_caps.ControlType, p_control_caps);
 
                 match p_control_caps.ControlType {
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE => {
+                        if let Some((min, max)) = exposure_range_microseconds(&p_control_caps) {
+                            self.camera_capabilities.exposure = VastCameraCapExposure {
+                                min_microseconds: min,
+                                max_microseconds: max,
+                                step: 1,
+                            };
+                        }
+                    }
                     crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN => {
                         if let Some((min, max)) = control_range(&p_control_caps) {
-                            self.camera_capabilities.gain = Some(VastCameraGain {
+                            self.camera_capabilities.gain = Some(VastCameraCapGain {
                                 min,
                                 max,
                                 step: control_step(min, max),
@@ -343,7 +416,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                     }
                     crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL => {
                         if let Some((min, max)) = control_range(&p_control_caps) {
-                            self.camera_capabilities.offset = Some(VastCameraOffset {
+                            self.camera_capabilities.offset = Some(VastCameraCapOffset {
                                 min,
                                 max,
                                 step: control_step(min, max),
@@ -351,13 +424,32 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                         }
                     }
                     crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE => {
-                        self.camera_capabilities.cooler = Some(VastCameraCooler {
+                        self.camera_capabilities.cooler = Some(VastCameraCapCooler {
                             min: p_control_caps.MinValue as f32,
                             max: p_control_caps.MaxValue as f32,
                             step: 1.0,
                         });
                     }
                     _ => {}
+                }
+            }
+
+            // Set bad pixel correction to disabled
+            if self.camera_controls.contains_key(
+                &crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BAD_PIXEL_CORRECTION_ENABLE,
+            ) {
+                result = crate::drivers::bindings::svb::SVBSetControlValue(
+                    camera_id,
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BAD_PIXEL_CORRECTION_ENABLE
+                        as i32,
+                    0,
+                    0,
+                );
+                if result != 0 {
+                    return Err(VastError {
+                        error_type: VastErrorType::CameraDriverError,
+                        message: format!("SVBSetControlValue failed: {}", result),
+                    });
                 }
             }
         }
@@ -375,18 +467,6 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
     fn get_capabilities(&self) -> VastCameraCapabilities {
         self.camera_capabilities.clone()
-    }
-
-    fn get_bayer_pattern(&self) -> &Option<CameraBayerPattern> {
-        &self.camera_capabilities.bayer_pattern
-    }
-
-    fn get_max_height(&self) -> u32 {
-        self.camera_capabilities.max_height
-    }
-
-    fn get_max_width(&self) -> u32 {
-        self.camera_capabilities.max_width
     }
 
     fn get_current_binning(&self) -> Result<(u32, u32), VastError> {
@@ -425,6 +505,12 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
             .unwrap_or(0);
 
         (enabled, target)
+    }
+
+    fn get_current_exposure(&self) -> u64 {
+        self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE)
+            .map(u64::from)
+            .unwrap_or(0)
     }
 
     fn set_gain(&mut self, gain: u32) {

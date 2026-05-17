@@ -51,18 +51,6 @@ impl Display for CameraFrameFormat {
     }
 }
 
-pub enum CameraCapabilities {
-    Color,
-    Mono,
-    Gain,
-    ISO,
-    Offset,
-    Cooler,
-    Roi,
-    Binning,
-    PulseGuide,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum VastCameraID {
     StrID(String),
@@ -104,43 +92,97 @@ pub struct VastCameraInfo {
 }
 
 #[derive(Clone)]
-pub struct VastCameraGain {
+pub struct VastCameraCapGain {
     pub min: u32,
     pub max: u32,
     pub step: u32,
 }
 
 #[derive(Clone)]
-pub struct VastCameraISO {
+pub struct VastCameraCapISO {
     pub min: u32,
     pub max: u32,
     pub multiplier: u32,
 }
 
 #[derive(Clone)]
-pub struct VastCameraOffset {
+pub struct VastCameraCapOffset {
     pub min: u32,
     pub max: u32,
     pub step: u32,
 }
 
 #[derive(Clone)]
-pub struct VastCameraCooler {
+pub struct VastCameraCapCooler {
     pub min: f32,
     pub max: f32,
     pub step: f32,
 }
 
 #[derive(Clone)]
+pub struct VastCameraCapExposure {
+    pub min_microseconds: u64,
+    pub max_microseconds: u64,
+    pub step: u8,
+}
+
+impl VastCameraCapExposure {
+    pub fn min_milliseconds(&self) -> u64 {
+        self.min_microseconds / 1_000
+    }
+
+    pub fn max_milliseconds(&self) -> u64 {
+        self.max_microseconds / 1_000
+    }
+
+    pub fn min_seconds(&self) -> f64 {
+        self.min_microseconds as f64 / 1_000_000.0
+    }
+
+    pub fn max_seconds(&self) -> f64 {
+        self.max_microseconds as f64 / 1_000_000.0
+    }
+}
+
+#[derive(Clone)]
+pub struct VastCameraCapRoiCombination {
+    pub bin: u32,
+    pub max_width: u32,
+    pub max_height: u32,
+    pub width_step: u32,
+    pub height_step: u32,
+}
+
+#[derive(Clone)]
+pub struct VastCameraCapRoi {
+    pub combinations: Vec<VastCameraCapRoiCombination>,
+}
+
+#[derive(Clone)]
+pub struct VastCameraCapBinning {
+    pub modes: Vec<u32>,
+}
+
+#[derive(Clone)]
+pub struct VastCameraCapGuide {
+    pub pulse_guide: bool,
+}
+
+#[derive(Clone)]
 pub struct VastCameraCapabilities {
-    pub gain: Option<VastCameraGain>,
-    pub iso: Option<VastCameraISO>,
-    pub offset: Option<VastCameraOffset>,
-    pub cooler: Option<VastCameraCooler>,
+    pub gain: Option<VastCameraCapGain>,
+    pub iso: Option<VastCameraCapISO>,
+    pub offset: Option<VastCameraCapOffset>,
+    pub cooler: Option<VastCameraCapCooler>,
+    pub roi: Option<VastCameraCapRoi>,
+    pub binning: Option<VastCameraCapBinning>,
+    pub guide: Option<VastCameraCapGuide>,
+    pub exposure: VastCameraCapExposure,
     pub frame_formats: Vec<CameraFrameFormat>,
     pub bayer_pattern: Option<CameraBayerPattern>,
     pub max_height: u32,
     pub max_width: u32,
+    pub adc_bits: u32,
 }
 
 impl Default for VastCameraCapabilities {
@@ -150,10 +192,19 @@ impl Default for VastCameraCapabilities {
             iso: None,
             offset: None,
             cooler: None,
+            roi: None,
+            binning: None,
+            guide: None,
             frame_formats: Vec::new(),
+            exposure: VastCameraCapExposure {
+                min_microseconds: 0,
+                max_microseconds: 0,
+                step: 0,
+            },
             bayer_pattern: None,
             max_height: 0,
             max_width: 0,
+            adc_bits: 0,
         }
     }
 }
@@ -176,16 +227,13 @@ pub trait VastCamera<IDT, T: VastCameraDriver> {
     fn get_name(&self) -> &str;
     fn get_capabilities(&self) -> VastCameraCapabilities;
 
-    fn get_bayer_pattern(&self) -> &Option<CameraBayerPattern>;
-    fn get_max_height(&self) -> u32;
-    fn get_max_width(&self) -> u32;
-
     fn get_current_binning(&self) -> Result<(u32, u32), VastError>;
     fn get_current_roi(&self) -> Result<(u32, u32, u32, u32), VastError>;
     fn get_current_gain(&self) -> u32;
     fn get_current_iso(&self) -> u32;
     fn get_current_offset(&self) -> u32;
     fn get_current_cooler(&self) -> (bool, u32);
+    fn get_current_exposure(&self) -> u64;
 
     fn set_gain(&mut self, gain: u32);
     fn set_iso(&mut self, iso: u32);
@@ -207,9 +255,15 @@ pub fn fancy_info_str(capabilities: &VastCameraCapabilities) -> String {
     ];
 
     if let Some(pattern) = &capabilities.bayer_pattern {
-        lines.push(format!("- Color: yes ({pattern} Bayer)"));
+        lines.push("- Type: Color".to_string());
+        lines.push(format!("- Bayer pattern: {pattern}"));
     } else {
-        lines.push("- Color: mono".to_string());
+        lines.push("- Type: Mono".to_string());
+        lines.push("- Bayer pattern: none".to_string());
+    }
+
+    if capabilities.adc_bits > 0 {
+        lines.push(format!("- ADC: {} bit", capabilities.adc_bits));
     }
 
     if capabilities.frame_formats.is_empty() {
@@ -228,6 +282,59 @@ pub fn fancy_info_str(capabilities: &VastCameraCapabilities) -> String {
         lines.push(format!(
             "- Gain: {}..{} step {}",
             gain.min, gain.max, gain.step
+        ));
+    }
+
+    if capabilities.exposure.max_microseconds > 0 {
+        lines.push(format!(
+            "- Exposure: {}..{} us ({}..{} ms, {:.3}..{:.3} s) step {}",
+            capabilities.exposure.min_microseconds,
+            capabilities.exposure.max_microseconds,
+            capabilities.exposure.min_milliseconds(),
+            capabilities.exposure.max_milliseconds(),
+            capabilities.exposure.min_seconds(),
+            capabilities.exposure.max_seconds(),
+            capabilities.exposure.step
+        ));
+    }
+
+    if let Some(roi) = &capabilities.roi {
+        if roi.combinations.is_empty() {
+            lines.push("- ROI: yes".to_string());
+        } else {
+            let combinations = roi
+                .combinations
+                .iter()
+                .map(|combination| {
+                    format!(
+                        "bin {}: up to {}x{} px, step {}x{}",
+                        combination.bin,
+                        combination.max_width,
+                        combination.max_height,
+                        combination.width_step,
+                        combination.height_step
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("; ");
+            lines.push(format!("- ROI: {combinations}"));
+        }
+    }
+
+    if let Some(binning) = &capabilities.binning {
+        let modes = binning
+            .modes
+            .iter()
+            .map(|mode| format!("{}x{}", mode, mode))
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(format!("- Binning: {modes}"));
+    }
+
+    if let Some(guide) = &capabilities.guide {
+        lines.push(format!(
+            "- Guide: pulse guide {}",
+            if guide.pulse_guide { "yes" } else { "no" }
         ));
     }
 
