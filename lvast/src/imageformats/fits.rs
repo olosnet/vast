@@ -211,7 +211,11 @@ fn fits_data_bytes(data: Vec<u8>, format: CameraFrameFormat) -> Vec<u8> {
         | CameraFrameFormat::RAW14
         | CameraFrameFormat::RAW16 => data
             .chunks_exact(2)
-            .flat_map(|chunk| i16::from_ne_bytes([chunk[0], chunk[1]]).to_be_bytes())
+            .flat_map(|chunk| {
+                let value = u16::from_ne_bytes([chunk[0], chunk[1]]) as i32;
+                let signed_value = (value - 32768) as i16;
+                signed_value.to_be_bytes()
+            })
             .collect(),
         CameraFrameFormat::RAW8 | CameraFrameFormat::RGB24 | CameraFrameFormat::RGB32 => data,
     }

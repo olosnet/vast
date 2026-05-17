@@ -9,15 +9,6 @@ use lvast::imageformats::{
     types::{ImageHeaders, ImageSaver},
 };
 
-fn nearby_test_value(current: Option<u32>, min: u32, max: u32) -> u32 {
-    let current = current.unwrap_or(min).clamp(min, max);
-    if current < max {
-        current + 1
-    } else {
-        current.saturating_sub(1).max(min)
-    }
-}
-
 fn safe_filename_part(value: &str) -> String {
     value
         .chars()
@@ -110,7 +101,7 @@ fn main() {
         let thread_name = format!("svb-camera-{}", camera.id);
         let handle = thread::Builder::new()
             .name(thread_name.clone())
-            .stack_size(16 * 1024 * 1024)
+            //.stack_size(16 * 1024 * 1024)
             .spawn(move || {
                 println!("Camera: {} ({})", camera.name, camera.id);
 
@@ -134,7 +125,7 @@ fn main() {
 
                         let mut planned_changes = Vec::new();
                         if let Some(gain) = &capabilities.gain {
-                            let value = nearby_test_value(settings.gain, gain.min, gain.max);
+                            let value = 100;
                             settings.gain = Some(value);
                             planned_changes.push(format!(
                                 "gain={} -> {} (range {}..{})",
@@ -145,7 +136,7 @@ fn main() {
                             ));
                         }
                         if let Some(offset) = &capabilities.offset {
-                            let value = nearby_test_value(settings.offset, offset.min, offset.max);
+                            let value = 10;
                             settings.offset = Some(value);
                             planned_changes.push(format!(
                                 "offset={} -> {} (range {}..{})",
