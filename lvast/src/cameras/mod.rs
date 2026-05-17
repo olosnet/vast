@@ -1,2 +1,2 @@
 pub mod svb;
-pub mod traits;
+pub mod types;

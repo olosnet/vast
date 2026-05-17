@@ -3,11 +3,11 @@ use std::path::PathBuf;
 
 fn main() {
     let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
-    
+
     // Get the manifest directory (where Cargo.toml is)
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let base_path = PathBuf::from(manifest_dir);
-    
+
     // Map Rust target architecture to SVB SDK library directory
     let lib_subdir = match target_arch.as_str() {
         "x86_64" => "x64",
@@ -17,7 +17,7 @@ fn main() {
         "arm" => "armv6",
         _ => panic!("Unsupported architecture: {}", target_arch),
     };
-    
+
     let lib_dir = base_path
         .join("../external/svb/lib")
         .join(lib_subdir)
@@ -26,7 +26,7 @@ fn main() {
 
     println!("cargo:rustc-link-search=native={}", lib_dir.display());
     println!("cargo:rustc-link-lib=static=SVBCameraSDK");
-    
+
     // Link C++ standard library and other dependencies
     println!("cargo:rustc-link-lib=dylib=stdc++");
     println!("cargo:rustc-link-lib=dylib=usb-1.0");
@@ -40,6 +40,6 @@ fn main() {
         .expect("Unable to generate bindings");
 
     bindings
-        .write_to_file("./src/bindings/svb.rs")
+        .write_to_file("./src/drivers/bindings/svb.rs")
         .expect("Couldn't write bindings!");
 }
