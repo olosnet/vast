@@ -1,39 +1,70 @@
 use crate::base::errors::VastError;
 
 #[derive(Debug, Clone, Default, PartialEq)]
+/// Optional metadata used to populate FITS header keywords.
 pub struct ImageHeaders {
+    /// Capture software name written as `CREATOR`.
     pub software: Option<String>,
+    /// Frame type written as `IMAGETYP`.
     pub image_type: Option<String>,
+    /// Target object name written as `OBJECT`.
     pub object: Option<String>,
+    /// Camera or instrument name written as `INSTRUME`.
     pub instrument: Option<String>,
+    /// Telescope name written as `TELESCOP`.
     pub telescope: Option<String>,
+    /// Observer name written as `OBSERVER`.
     pub observer: Option<String>,
+    /// UTC observation start written as `DATE-OBS`.
     pub date_obs: Option<String>,
+    /// Exposure duration in seconds written as `EXPTIME` and `EXPOSURE`.
     pub exposure_seconds: Option<f64>,
+    /// Filter name written as `FILTER`.
     pub filter: Option<String>,
+    /// Camera gain written as `GAIN`.
     pub gain: Option<u32>,
+    /// Camera offset written as `OFFSET`.
     pub offset: Option<u32>,
+    /// Sensor temperature in Celsius written as `CCD-TEMP`.
     pub ccd_temperature: Option<f64>,
+    /// Cooler target temperature in Celsius written as `SET-TEMP`.
     pub target_temperature: Option<f64>,
+    /// Horizontal binning written as `XBINNING`.
     pub bin_x: Option<u32>,
+    /// Vertical binning written as `YBINNING`.
     pub bin_y: Option<u32>,
+    /// Subframe X origin written as `XORGSUBF`.
     pub frame_x: Option<u32>,
+    /// Subframe Y origin written as `YORGSUBF`.
     pub frame_y: Option<u32>,
+    /// Subframe width in pixels.
     pub frame_width: Option<u32>,
+    /// Subframe height in pixels.
     pub frame_height: Option<u32>,
+    /// Bayer pattern string written as `BAYERPAT`.
     pub bayer_pattern: Option<String>,
+    /// Right ascension in degrees written as `RA`.
     pub ra_degrees: Option<f64>,
+    /// Declination in degrees written as `DEC`.
     pub dec_degrees: Option<f64>,
+    /// Pixel scale in arcseconds per pixel written as `SCALE`.
     pub pixel_scale_arcsec: Option<f64>,
+    /// Telescope focal length in millimeters written as `FOCALLEN`.
     pub focal_length_mm: Option<f64>,
+    /// Telescope aperture in millimeters written as `APTDIA`.
     pub aperture_mm: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Typed FITS header value.
 pub enum FitsHeaderValue {
+    /// String header value.
     String(String),
+    /// Integer header value.
     Integer(i64),
+    /// Floating-point header value.
     Float(f64),
+    /// Boolean header value.
     Boolean(bool),
 }
 
@@ -74,13 +105,18 @@ impl From<bool> for FitsHeaderValue {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// One FITS header card before serialization to the 80-byte FITS card format.
 pub struct HeaderCard {
+    /// FITS keyword. Must be valid for the target writer.
     pub key: &'static str,
+    /// FITS keyword value.
     pub value: FitsHeaderValue,
+    /// FITS comment associated with the keyword.
     pub comment: &'static str,
 }
 
 impl ImageHeaders {
+    /// Converts optional image metadata into FITS header cards.
     pub fn to_fits_headers(&self) -> Vec<HeaderCard> {
         let mut headers = Vec::new();
 
@@ -227,6 +263,7 @@ fn push_optional<T: Into<FitsHeaderValue>>(
 }
 
 pub trait ImageSaver {
+    /// Saves image bytes with optional header cards to `path`.
     fn save(
         &self,
         data: Vec<u8>,

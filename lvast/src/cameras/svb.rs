@@ -12,6 +12,7 @@ use crate::cameras::types::{
     VastCameraInfo, VastCameraSettings, VastCameraStreamingPreview,
 };
 
+/// SVBONY/SVB SDK camera driver.
 pub struct SVBVastCameraDriver {
     sdk_lock: Mutex<()>,
 }
@@ -195,6 +196,7 @@ impl VastCameraDriver for SVBVastCameraDriver {
     }
 }
 
+/// Connected SVBONY/SVB camera implementation.
 pub struct SvbVastCamera {
     _driver: Arc<SVBVastCameraDriver>,
     camera_lock: Arc<Mutex<()>>,

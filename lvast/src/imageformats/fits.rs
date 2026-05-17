@@ -8,13 +8,18 @@ const FITS_BLOCK_SIZE: usize = 2880;
 const FITS_CARD_SIZE: usize = 80;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// FITS saver configured for one image geometry and camera frame format.
 pub struct FitsImageSaver {
+    /// Image width in pixels.
     pub width: u32,
+    /// Image height in pixels.
     pub height: u32,
+    /// Raw camera frame format used to encode FITS pixel data.
     pub format: CameraFrameFormat,
 }
 
 impl FitsImageSaver {
+    /// Creates a FITS saver for frames with the given dimensions and format.
     pub fn new(width: u32, height: u32, format: CameraFrameFormat) -> Self {
         Self {
             width,
