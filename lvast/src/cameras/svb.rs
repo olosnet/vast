@@ -3,10 +3,12 @@ use std::sync::Arc;
 
 use crate::base::errors::{VastError, VastErrorType};
 use crate::cameras::types::{
-    CameraBayerPattern, CameraFrameFormat, VastCamera, VastCameraCapBinning, VastCameraCapCooler,
-    VastCameraCapExposure, VastCameraCapGain, VastCameraCapGuiding, VastCameraCapOffset,
-    VastCameraCapRange, VastCameraCapRoi, VastCameraCapRoiCombination, VastCameraCapWhiteBalance,
-    VastCameraCapabilities, VastCameraDriver, VastCameraID, VastCameraInfo, VastCameraSettings,
+    CameraBayerPattern, CameraFrameFormat, VastCamera, VastCameraAcquireImage,
+    VastCameraCapBinning, VastCameraCapCooler, VastCameraCapExposure, VastCameraCapGain,
+    VastCameraCapGuiding, VastCameraCapOffset, VastCameraCapRange, VastCameraCapRoi,
+    VastCameraCapRoiCombination, VastCameraCapWhiteBalance, VastCameraCapabilities,
+    VastCameraDriver, VastCameraFrame, VastCameraGuide, VastCameraGuideDirection, VastCameraID,
+    VastCameraInfo, VastCameraSettings, VastCameraStreamingPreview,
 };
 
 pub struct SVBVastCameraDriver;
@@ -254,6 +256,34 @@ fn roi_combinations(
             height_step: 2,
         })
         .collect()
+}
+
+fn frame_size_bytes(width: u32, height: u32, format: CameraFrameFormat) -> usize {
+    let bytes_per_pixel = match format {
+        CameraFrameFormat::RAW8 | CameraFrameFormat::RAW10 | CameraFrameFormat::RAW12 => 1,
+        CameraFrameFormat::RAW14 | CameraFrameFormat::RAW16 => 2,
+        CameraFrameFormat::RGB24 => 3,
+        CameraFrameFormat::RGB32 => 4,
+    };
+
+    width as usize * height as usize * bytes_per_pixel
+}
+
+fn svb_guide_direction(direction: VastCameraGuideDirection) -> i32 {
+    match direction {
+        VastCameraGuideDirection::North => {
+            crate::drivers::bindings::svb::SVB_GUIDE_DIRECTION_SVB_GUIDE_NORTH as i32
+        }
+        VastCameraGuideDirection::South => {
+            crate::drivers::bindings::svb::SVB_GUIDE_DIRECTION_SVB_GUIDE_SOUTH as i32
+        }
+        VastCameraGuideDirection::East => {
+            crate::drivers::bindings::svb::SVB_GUIDE_DIRECTION_SVB_GUIDE_EAST as i32
+        }
+        VastCameraGuideDirection::West => {
+            crate::drivers::bindings::svb::SVB_GUIDE_DIRECTION_SVB_GUIDE_WEST as i32
+        }
+    }
 }
 
 fn svb_result(result: i32, message: &str) -> Result<(), VastError> {
@@ -815,7 +845,126 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
     }
 }
 
+impl VastCameraAcquireImage for SvbVastCamera {
+    fn start_image_acquisition(&mut self) -> Result<(), VastError> {
+        let camera_id = self.open_camera_id()?;
+
+        let result = unsafe {
+            crate::drivers::bindings::svb::SVBSetCameraMode(
+                camera_id,
+                crate::drivers::bindings::svb::SVB_CAMERA_MODE_SVB_MODE_TRIG_SOFT,
+            )
+        };
+        svb_result(result, "SVBSetCameraMode failed")?;
+
+        let result = unsafe { crate::drivers::bindings::svb::SVBStartVideoCapture(camera_id) };
+        svb_result(result, "SVBStartVideoCapture failed")?;
+
+        let result = unsafe { crate::drivers::bindings::svb::SVBSendSoftTrigger(camera_id) };
+        svb_result(result, "SVBSendSoftTrigger failed")
+    }
+
+    fn abort_image_acquisition(&mut self) -> Result<(), VastError> {
+        let camera_id = self.open_camera_id()?;
+        let result = unsafe { crate::drivers::bindings::svb::SVBStopVideoCapture(camera_id) };
+        svb_result(result, "SVBStopVideoCapture failed")
+    }
+
+    fn get_acquired_image(&mut self, timeout_millis: u32) -> Result<VastCameraFrame, VastError> {
+        let frame = self.read_video_frame(timeout_millis)?;
+        self.abort_image_acquisition()?;
+        Ok(frame)
+    }
+}
+
+impl VastCameraGuide for SvbVastCamera {
+    fn pulse_guide(
+        &mut self,
+        direction: VastCameraGuideDirection,
+        duration_millis: u32,
+    ) -> Result<(), VastError> {
+        let camera_id = self.open_camera_id()?;
+        let result = unsafe {
+            crate::drivers::bindings::svb::SVBPulseGuide(
+                camera_id,
+                svb_guide_direction(direction),
+                duration_millis as i32,
+            )
+        };
+        svb_result(result, "SVBPulseGuide failed")
+    }
+}
+
+impl VastCameraStreamingPreview for SvbVastCamera {
+    fn start_streaming_preview(&mut self) -> Result<(), VastError> {
+        let camera_id = self.open_camera_id()?;
+        let result = unsafe {
+            crate::drivers::bindings::svb::SVBSetCameraMode(
+                camera_id,
+                crate::drivers::bindings::svb::SVB_CAMERA_MODE_SVB_MODE_NORMAL,
+            )
+        };
+        svb_result(result, "SVBSetCameraMode failed")?;
+
+        let result = unsafe { crate::drivers::bindings::svb::SVBStartVideoCapture(camera_id) };
+        svb_result(result, "SVBStartVideoCapture failed")
+    }
+
+    fn get_streaming_preview_frame(
+        &mut self,
+        timeout_millis: u32,
+    ) -> Result<VastCameraFrame, VastError> {
+        self.read_video_frame(timeout_millis)
+    }
+
+    fn stop_streaming_preview(&mut self) -> Result<(), VastError> {
+        let camera_id = self.open_camera_id()?;
+        let result = unsafe { crate::drivers::bindings::svb::SVBStopVideoCapture(camera_id) };
+        svb_result(result, "SVBStopVideoCapture failed")
+    }
+}
+
 impl SvbVastCamera {
+    fn open_camera_id(&self) -> Result<i32, VastError> {
+        self.camera_id.ok_or_else(|| VastError {
+            error_type: VastErrorType::CameraError,
+            message: "Camera is not connected".to_string(),
+        })
+    }
+
+    fn current_image_format(&self) -> Result<CameraFrameFormat, VastError> {
+        let camera_id = self.open_camera_id()?;
+        let mut image_type = 0;
+        let result = unsafe {
+            crate::drivers::bindings::svb::SVBGetOutputImageType(camera_id, &mut image_type)
+        };
+        svb_result(result, "SVBGetOutputImageType failed")?;
+        Ok(image_type.into())
+    }
+
+    fn read_video_frame(&self, timeout_millis: u32) -> Result<VastCameraFrame, VastError> {
+        let camera_id = self.open_camera_id()?;
+        let (.., width, height, _) = self.get_current_roi_parts()?;
+        let format = self.current_image_format()?;
+        let mut data = vec![0; frame_size_bytes(width, height, format)];
+        let result = unsafe {
+            crate::drivers::bindings::svb::SVBGetVideoData(
+                camera_id,
+                data.as_mut_ptr(),
+                data.len() as i64,
+                timeout_millis as i32,
+            )
+        };
+        svb_result(result, "SVBGetVideoData failed")?;
+
+        Ok(VastCameraFrame {
+            width,
+            height,
+            format,
+            data,
+        })
+    }
+
     fn current_gain(&self) -> u32 {
         self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN)
             .unwrap_or(0)

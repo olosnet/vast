@@ -91,6 +91,22 @@ pub struct VastCameraInfo {
     pub raw_extra_info: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VastCameraFrame {
+    pub width: u32,
+    pub height: u32,
+    pub format: CameraFrameFormat,
+    pub data: Vec<u8>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VastCameraGuideDirection {
+    North,
+    South,
+    East,
+    West,
+}
+
 #[derive(Clone)]
 pub struct VastCameraCapGain {
     pub min: u32,
@@ -334,6 +350,29 @@ pub trait VastCamera<IDT, T: VastCameraDriver> {
     fn get_settings(&self) -> VastCameraSettings;
 
     fn disconnect(&mut self) -> Result<(), VastError>;
+}
+
+pub trait VastCameraAcquireImage {
+    fn start_image_acquisition(&mut self) -> Result<(), VastError>;
+    fn abort_image_acquisition(&mut self) -> Result<(), VastError>;
+    fn get_acquired_image(&mut self, timeout_millis: u32) -> Result<VastCameraFrame, VastError>;
+}
+
+pub trait VastCameraGuide {
+    fn pulse_guide(
+        &mut self,
+        direction: VastCameraGuideDirection,
+        duration_millis: u32,
+    ) -> Result<(), VastError>;
+}
+
+pub trait VastCameraStreamingPreview {
+    fn start_streaming_preview(&mut self) -> Result<(), VastError>;
+    fn get_streaming_preview_frame(
+        &mut self,
+        timeout_millis: u32,
+    ) -> Result<VastCameraFrame, VastError>;
+    fn stop_streaming_preview(&mut self) -> Result<(), VastError>;
 }
 
 impl VastCameraCapabilities {
