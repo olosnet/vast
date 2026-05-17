@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use crate::base::errors::{VastError, VastErrorType};
 use crate::cameras::types::{
-    fancy_info_str, CameraBayerPattern, CameraFrameFormat, VastCamera, VastCameraCapBinning,
-    VastCameraCapCooler, VastCameraCapExposure, VastCameraCapGain, VastCameraCapGuide,
-    VastCameraCapOffset, VastCameraCapRoi, VastCameraCapRoiCombination, VastCameraCapabilities,
-    VastCameraDriver, VastCameraID, VastCameraInfo,
+    CameraBayerPattern, CameraFrameFormat, VastCamera, VastCameraCapBinning, VastCameraCapCooler,
+    VastCameraCapExposure, VastCameraCapGain, VastCameraCapGuiding, VastCameraCapOffset,
+    VastCameraCapRange, VastCameraCapRoi, VastCameraCapRoiCombination, VastCameraCapWhiteBalance,
+    VastCameraCapabilities, VastCameraDriver, VastCameraID, VastCameraInfo, VastCameraSettings,
 };
 
 pub struct SVBVastCameraDriver;
@@ -90,6 +90,25 @@ fn svb_error_code_to_string(code: u32) -> &'static str {
     }
 }
 
+fn svb_control_type_to_string(control_type: u32) -> &'static str {
+    match control_type {
+        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN => "GAIN",
+        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE => "EXPOSURE",
+        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL => "BLACK_LEVEL",
+        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_COOLER_ENABLE => "COOLER_ENABLE",
+        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE => {
+            "TARGET_TEMPERATURE"
+        }
+        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_CURRENT_TEMPERATURE => {
+            "CURRENT_TEMPERATURE"
+        }
+        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BAD_PIXEL_CORRECTION_ENABLE => {
+            "BAD_PIXEL_CORRECTION_ENABLE"
+        }
+        _ => "UNKNOWN_CONTROL",
+    }
+}
+
 impl VastCameraDriver for SVBVastCameraDriver {
     fn new() -> Self {
         Self
@@ -169,6 +188,7 @@ pub struct SvbVastCamera {
     camera_id: Option<i32>,
     camera_name: String,
     camera_capabilities: VastCameraCapabilities,
+    camera_settings: VastCameraSettings,
     camera_is_trigger_cam: bool,
 }
 
@@ -185,6 +205,21 @@ fn control_step(min: u32, max: u32) -> u32 {
     } else {
         0
     }
+}
+
+fn control_cap_range(
+    control: &crate::drivers::bindings::svb::SVB_CONTROL_CAPS,
+) -> Option<VastCameraCapRange> {
+    let (min, max) = control_range(control)?;
+    Some(VastCameraCapRange {
+        min,
+        max,
+        step: control_step(min, max),
+    })
+}
+
+fn control_is_writable(control: &crate::drivers::bindings::svb::SVB_CONTROL_CAPS) -> bool {
+    control.IsWritable != 0
 }
 
 fn exposure_range_microseconds(
@@ -240,6 +275,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
             camera_id: None,
             camera_name: String::new(),
             camera_capabilities: VastCameraCapabilities::default(),
+            camera_settings: VastCameraSettings::default(),
             camera_is_trigger_cam: false,
         }
     }
@@ -336,7 +372,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                 &mut p_camera_property_ex,
             );
             if result == 0 {
-                self.camera_capabilities.guide = Some(VastCameraCapGuide {
+                self.camera_capabilities.guiding = Some(VastCameraCapGuiding {
                     pulse_guide: p_camera_property_ex.bSupportPulseGuide != 0,
                 });
             }
@@ -363,6 +399,10 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                     message: format!("SVBGetNumOfControls failed: {}", result),
                 });
             }
+
+            let mut white_balance_red = None;
+            let mut white_balance_green = None;
+            let mut white_balance_blue = None;
 
             for i in 0..pi_number_of_controls {
                 let mut p_control_caps =
@@ -406,32 +446,81 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                         }
                     }
                     crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN => {
-                        if let Some((min, max)) = control_range(&p_control_caps) {
-                            self.camera_capabilities.gain = Some(VastCameraCapGain {
-                                min,
-                                max,
-                                step: control_step(min, max),
-                            });
+                        if control_is_writable(&p_control_caps) {
+                            if let Some((min, max)) = control_range(&p_control_caps) {
+                                self.camera_capabilities.gain = Some(VastCameraCapGain {
+                                    min,
+                                    max,
+                                    step: control_step(min, max),
+                                });
+                            }
                         }
                     }
                     crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL => {
-                        if let Some((min, max)) = control_range(&p_control_caps) {
-                            self.camera_capabilities.offset = Some(VastCameraCapOffset {
-                                min,
-                                max,
-                                step: control_step(min, max),
-                            });
+                        if control_is_writable(&p_control_caps) {
+                            if let Some((min, max)) = control_range(&p_control_caps) {
+                                self.camera_capabilities.offset = Some(VastCameraCapOffset {
+                                    min,
+                                    max,
+                                    step: control_step(min, max),
+                                });
+                            }
                         }
                     }
                     crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE => {
-                        self.camera_capabilities.cooler = Some(VastCameraCapCooler {
-                            min: p_control_caps.MinValue as f32,
-                            max: p_control_caps.MaxValue as f32,
-                            step: 1.0,
-                        });
+                        if control_is_writable(&p_control_caps) {
+                            self.camera_capabilities.cooler = Some(VastCameraCapCooler {
+                                min: p_control_caps.MinValue as f32,
+                                max: p_control_caps.MaxValue as f32,
+                                step: 1.0,
+                            });
+                        }
+                    }
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_R => {
+                        if control_is_writable(&p_control_caps) {
+                            white_balance_red = control_cap_range(&p_control_caps);
+                        }
+                    }
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_G => {
+                        if control_is_writable(&p_control_caps) {
+                            white_balance_green = control_cap_range(&p_control_caps);
+                        }
+                    }
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_B => {
+                        if control_is_writable(&p_control_caps) {
+                            white_balance_blue = control_cap_range(&p_control_caps);
+                        }
+                    }
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_CONTRAST => {
+                        if control_is_writable(&p_control_caps) {
+                            self.camera_capabilities.contrast = control_cap_range(&p_control_caps);
+                        }
+                    }
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SHARPNESS => {
+                        if control_is_writable(&p_control_caps) {
+                            self.camera_capabilities.sharpness = control_cap_range(&p_control_caps);
+                        }
+                    }
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SATURATION => {
+                        if control_is_writable(&p_control_caps) {
+                            self.camera_capabilities.saturation =
+                                control_cap_range(&p_control_caps);
+                        }
+                    }
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_FRAME_SPEED_MODE => {
+                        if control_is_writable(&p_control_caps) {
+                            self.camera_capabilities.usb_speed = control_cap_range(&p_control_caps);
+                        }
                     }
                     _ => {}
                 }
+            }
+
+            if let (Some(red), Some(green), Some(blue)) =
+                (white_balance_red, white_balance_green, white_balance_blue)
+            {
+                self.camera_capabilities.white_balance =
+                    Some(VastCameraCapWhiteBalance { red, green, blue });
             }
 
             // Set bad pixel correction to disabled
@@ -452,13 +541,23 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                     });
                 }
             }
+
+            // INDI applies this SDK workaround before using writable controls.
+            crate::drivers::bindings::svb::SVBSetControlValue(
+                camera_id,
+                crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE as i32,
+                1_000_000,
+                0,
+            );
+            crate::drivers::bindings::svb::SVBSetCameraMode(
+                camera_id,
+                crate::drivers::bindings::svb::SVB_CAMERA_MODE_SVB_MODE_TRIG_SOFT,
+            );
         }
 
-        Ok(())
-    }
+        self.get_camera_settings()?;
 
-    fn camera_info_str(&self) -> String {
-        fancy_info_str(&self.camera_capabilities)
+        Ok(())
     }
 
     fn get_name(&self) -> &str {
@@ -467,25 +566,6 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
     fn get_capabilities(&self) -> VastCameraCapabilities {
         self.camera_capabilities.clone()
-    }
-
-    fn get_current_binning(&self) -> Result<(u32, u32), VastError> {
-        let (_, _, _, _, bin) = self.get_current_roi_parts()?;
-        Ok((bin, bin))
-    }
-
-    fn get_current_roi(&self) -> Result<(u32, u32, u32, u32), VastError> {
-        let (x, y, width, height, _) = self.get_current_roi_parts()?;
-        Ok((x, y, width, height))
-    }
-
-    fn get_current_gain(&self) -> u32 {
-        self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN)
-            .unwrap_or(0)
-    }
-
-    fn get_current_iso(&self) -> u32 {
-        0
     }
 
     fn get_current_offset(&self) -> u32 {
@@ -507,78 +587,222 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
         (enabled, target)
     }
 
-    fn get_current_exposure(&self) -> u64 {
-        self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE)
-            .map(u64::from)
-            .unwrap_or(0)
+    fn get_current_temperature(&self) -> f32 {
+        self.get_control_value(
+            crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_CURRENT_TEMPERATURE,
+        )
+        .map(|temperature| temperature as f32 / 10.0)
+        .unwrap_or(0.0)
     }
 
-    fn set_gain(&mut self, gain: u32) {
-        self.set_control_value(
-            crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN,
-            gain,
-        );
-    }
-
-    fn set_iso(&mut self, _iso: u32) {}
-
-    fn set_offset(&mut self, offset: u32) {
-        self.set_control_value(
-            crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL,
-            offset,
-        );
-    }
-
-    fn set_cooler(&mut self, on: bool, temperature: u32) {
-        self.set_control_value(
-            crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_COOLER_ENABLE,
-            u32::from(on),
-        );
-        self.set_control_value(
-            crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE,
-            temperature,
-        );
-    }
-
-    fn set_roi(&mut self, x: u32, y: u32, width: u32, height: u32) {
-        if let Some(camera_id) = self.camera_id {
-            let bin = self
-                .get_current_roi_parts()
-                .map(|(_, _, _, _, bin)| bin)
-                .unwrap_or(1);
-            unsafe {
-                crate::drivers::bindings::svb::SVBSetROIFormat(
-                    camera_id,
-                    x as i32,
-                    y as i32,
-                    width as i32,
-                    height as i32,
-                    bin as i32,
-                );
+    fn set_camera_settings(&mut self, settings: VastCameraSettings) -> Result<(), VastError> {
+        if self.camera_capabilities.exposure.max_microseconds > 0
+            && settings.exposure_microseconds != self.camera_settings.exposure_microseconds
+        {
+            if let Some(exposure) = settings.exposure_microseconds {
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE,
+                    exposure.try_into().unwrap_or(u32::MAX),
+                )?;
             }
         }
+
+        if self.camera_capabilities.gain.is_some() && settings.gain != self.camera_settings.gain {
+            if let Some(gain) = settings.gain {
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN,
+                    gain,
+                )?;
+            }
+        }
+
+        if self.camera_capabilities.offset.is_some()
+            && settings.offset != self.camera_settings.offset
+        {
+            if let Some(offset) = settings.offset {
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL,
+                    offset,
+                )?;
+            }
+        }
+
+        if self.camera_capabilities.cooler.is_some()
+            && settings.cooler != self.camera_settings.cooler
+        {
+            if let Some((enabled, temperature)) = settings.cooler {
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_COOLER_ENABLE,
+                    u32::from(enabled),
+                )?;
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE,
+                    temperature,
+                )?;
+            }
+        }
+
+        if self.camera_capabilities.white_balance.is_some()
+            && settings.white_balance != self.camera_settings.white_balance
+        {
+            if let Some((red, green, blue)) = settings.white_balance {
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_R,
+                    red,
+                )?;
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_G,
+                    green,
+                )?;
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_B,
+                    blue,
+                )?;
+            }
+        }
+
+        if self.camera_capabilities.contrast.is_some()
+            && settings.contrast != self.camera_settings.contrast
+        {
+            if let Some(contrast) = settings.contrast {
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_CONTRAST,
+                    contrast,
+                )?;
+            }
+        }
+
+        if self.camera_capabilities.sharpness.is_some()
+            && settings.sharpness != self.camera_settings.sharpness
+        {
+            if let Some(sharpness) = settings.sharpness {
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SHARPNESS,
+                    sharpness,
+                )?;
+            }
+        }
+
+        if self.camera_capabilities.saturation.is_some()
+            && settings.saturation != self.camera_settings.saturation
+        {
+            if let Some(saturation) = settings.saturation {
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SATURATION,
+                    saturation,
+                )?;
+            }
+        }
+
+        if self.camera_capabilities.usb_speed.is_some()
+            && settings.usb_speed != self.camera_settings.usb_speed
+        {
+            if let Some(usb_speed) = settings.usb_speed {
+                self.set_control_value_result(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_FRAME_SPEED_MODE,
+                    usb_speed,
+                )?;
+            }
+        }
+
+        let roi_changed =
+            self.camera_capabilities.roi.is_some() && settings.roi != self.camera_settings.roi;
+        let binning_changed = self.camera_capabilities.binning.is_some()
+            && settings.binning != self.camera_settings.binning;
+        if roi_changed || binning_changed {
+            let (current_x, current_y, current_width, current_height, current_bin) =
+                self.get_current_roi_parts()?;
+            let (x, y, width, height) =
+                settings
+                    .roi
+                    .unwrap_or((current_x, current_y, current_width, current_height));
+            let bin = settings
+                .binning
+                .map(|(horizontal, _vertical)| horizontal)
+                .unwrap_or(current_bin);
+            self.set_roi_format(x, y, width, height, bin)?;
+        }
+
+        self.get_camera_settings()?;
+        Ok(())
     }
 
-    fn set_binning(&mut self, h: u32, _v: u32) {
-        if let Some(camera_id) = self.camera_id {
-            let (x, y, width, height, _) = self.get_current_roi_parts().unwrap_or((
-                0,
-                0,
-                self.camera_capabilities.max_width,
-                self.camera_capabilities.max_height,
-                1,
+    fn get_camera_settings(&mut self) -> Result<VastCameraSettings, VastError> {
+        let mut settings = VastCameraSettings::default();
+
+        if self.camera_capabilities.exposure.max_microseconds > 0 {
+            settings.exposure_microseconds = Some(self.current_exposure());
+        }
+
+        if self.camera_capabilities.gain.is_some() {
+            settings.gain = Some(self.current_gain());
+        }
+
+        if self.camera_capabilities.iso.is_some() {
+            settings.iso = Some(self.current_iso());
+        }
+
+        if self.camera_capabilities.offset.is_some() {
+            settings.offset = Some(self.get_current_offset());
+        }
+
+        if self.camera_capabilities.cooler.is_some() {
+            settings.cooler = Some(self.get_current_cooler());
+        }
+
+        if self.camera_capabilities.white_balance.is_some() {
+            settings.white_balance = Some((
+                self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_R)
+                    .unwrap_or(0),
+                self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_G)
+                    .unwrap_or(0),
+                self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_B)
+                    .unwrap_or(0),
             ));
-            unsafe {
-                crate::drivers::bindings::svb::SVBSetROIFormat(
-                    camera_id,
-                    x as i32,
-                    y as i32,
-                    width as i32,
-                    height as i32,
-                    h as i32,
-                );
+        }
+
+        if self.camera_capabilities.contrast.is_some() {
+            settings.contrast = self
+                .get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_CONTRAST)
+                .ok();
+        }
+
+        if self.camera_capabilities.sharpness.is_some() {
+            settings.sharpness = self
+                .get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SHARPNESS)
+                .ok();
+        }
+
+        if self.camera_capabilities.saturation.is_some() {
+            settings.saturation = self
+                .get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SATURATION)
+                .ok();
+        }
+
+        if self.camera_capabilities.usb_speed.is_some() {
+            settings.usb_speed = self
+                .get_control_value(
+                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_FRAME_SPEED_MODE,
+                )
+                .ok();
+        }
+
+        if self.camera_capabilities.roi.is_some() || self.camera_capabilities.binning.is_some() {
+            let (x, y, width, height, bin) = self.get_current_roi_parts()?;
+            if self.camera_capabilities.roi.is_some() {
+                settings.roi = Some((x, y, width, height));
+            }
+            if self.camera_capabilities.binning.is_some() {
+                settings.binning = Some((bin, bin));
             }
         }
+
+        self.camera_settings = settings.clone();
+        Ok(settings)
+    }
+
+    fn get_settings(&self) -> VastCameraSettings {
+        self.camera_settings.clone()
     }
 
     fn disconnect(&mut self) -> Result<(), VastError> {
@@ -592,6 +816,21 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 }
 
 impl SvbVastCamera {
+    fn current_gain(&self) -> u32 {
+        self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN)
+            .unwrap_or(0)
+    }
+
+    fn current_iso(&self) -> u32 {
+        0
+    }
+
+    fn current_exposure(&self) -> u64 {
+        self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE)
+            .map(u64::from)
+            .unwrap_or(0)
+    }
+
     fn get_control_value(&self, control_type: u32) -> Result<u32, VastError> {
         let Some(camera_id) = self.camera_id else {
             return Ok(0);
@@ -612,17 +851,74 @@ impl SvbVastCamera {
         Ok(value.try_into().unwrap_or(0))
     }
 
-    fn set_control_value(&self, control_type: u32, value: u32) {
-        if let Some(camera_id) = self.camera_id {
-            unsafe {
-                crate::drivers::bindings::svb::SVBSetControlValue(
-                    camera_id,
-                    control_type as i32,
-                    value.into(),
-                    0,
-                );
-            }
-        }
+    fn set_control_value_result(&self, control_type: u32, value: u32) -> Result<(), VastError> {
+        let Some(camera_id) = self.camera_id else {
+            return Ok(());
+        };
+
+        let requested_value = value;
+        let (value, control_context) = self
+            .camera_controls
+            .get(&control_type)
+            .map(|control| {
+                let min = u32::try_from(control.MinValue).unwrap_or(0);
+                let max = u32::try_from(control.MaxValue).unwrap_or(u32::MAX);
+                let value = value.clamp(min, max);
+                (
+                    value,
+                    format!(
+                        "requested={requested_value}, set={value}, range={min}..{max}, writable={}",
+                        control.IsWritable
+                    ),
+                )
+            })
+            .unwrap_or((
+                value,
+                format!(
+                    "requested={requested_value}, set={value}, range=unknown, writable=unknown"
+                ),
+            ));
+
+        let result = unsafe {
+            crate::drivers::bindings::svb::SVBSetControlValue(
+                camera_id,
+                control_type as i32,
+                value.into(),
+                0,
+            )
+        };
+        svb_result(
+            result,
+            &format!(
+                "SVBSetControlValue failed for {} ({control_type}, {control_context})",
+                svb_control_type_to_string(control_type),
+            ),
+        )
+    }
+
+    fn set_roi_format(
+        &self,
+        x: u32,
+        y: u32,
+        width: u32,
+        height: u32,
+        bin: u32,
+    ) -> Result<(), VastError> {
+        let Some(camera_id) = self.camera_id else {
+            return Ok(());
+        };
+
+        let result = unsafe {
+            crate::drivers::bindings::svb::SVBSetROIFormat(
+                camera_id,
+                x as i32,
+                y as i32,
+                width as i32,
+                height as i32,
+                bin as i32,
+            )
+        };
+        svb_result(result, "SVBSetROIFormat failed")
     }
 
     fn get_current_roi_parts(&self) -> Result<(u32, u32, u32, u32, u32), VastError> {

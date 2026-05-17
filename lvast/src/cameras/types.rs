@@ -113,6 +113,20 @@ pub struct VastCameraCapOffset {
 }
 
 #[derive(Clone)]
+pub struct VastCameraCapRange {
+    pub min: u32,
+    pub max: u32,
+    pub step: u32,
+}
+
+#[derive(Clone)]
+pub struct VastCameraCapWhiteBalance {
+    pub red: VastCameraCapRange,
+    pub green: VastCameraCapRange,
+    pub blue: VastCameraCapRange,
+}
+
+#[derive(Clone)]
 pub struct VastCameraCapCooler {
     pub min: f32,
     pub max: f32,
@@ -164,7 +178,7 @@ pub struct VastCameraCapBinning {
 }
 
 #[derive(Clone)]
-pub struct VastCameraCapGuide {
+pub struct VastCameraCapGuiding {
     pub pulse_guide: bool,
 }
 
@@ -174,15 +188,96 @@ pub struct VastCameraCapabilities {
     pub iso: Option<VastCameraCapISO>,
     pub offset: Option<VastCameraCapOffset>,
     pub cooler: Option<VastCameraCapCooler>,
+    pub white_balance: Option<VastCameraCapWhiteBalance>,
+    pub contrast: Option<VastCameraCapRange>,
+    pub sharpness: Option<VastCameraCapRange>,
+    pub saturation: Option<VastCameraCapRange>,
+    pub usb_speed: Option<VastCameraCapRange>,
     pub roi: Option<VastCameraCapRoi>,
     pub binning: Option<VastCameraCapBinning>,
-    pub guide: Option<VastCameraCapGuide>,
+    pub guiding: Option<VastCameraCapGuiding>,
     pub exposure: VastCameraCapExposure,
     pub frame_formats: Vec<CameraFrameFormat>,
     pub bayer_pattern: Option<CameraBayerPattern>,
     pub max_height: u32,
     pub max_width: u32,
     pub adc_bits: u32,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct VastCameraSettings {
+    pub exposure_microseconds: Option<u64>,
+    pub gain: Option<u32>,
+    pub iso: Option<u32>,
+    pub offset: Option<u32>,
+    pub cooler: Option<(bool, u32)>,
+    pub white_balance: Option<(u32, u32, u32)>,
+    pub contrast: Option<u32>,
+    pub sharpness: Option<u32>,
+    pub saturation: Option<u32>,
+    pub usb_speed: Option<u32>,
+    pub roi: Option<(u32, u32, u32, u32)>,
+    pub binning: Option<(u32, u32)>,
+}
+
+impl VastCameraSettings {
+    pub fn fancy_info_str(&self) -> String {
+        let mut lines = vec!["Camera settings".to_string()];
+
+        if let Some(exposure) = self.exposure_microseconds {
+            lines.push(format!("- Exposure: {exposure} us"));
+        }
+
+        if let Some(gain) = self.gain {
+            lines.push(format!("- Gain: {gain}"));
+        }
+
+        if let Some(iso) = self.iso {
+            lines.push(format!("- ISO: {iso}"));
+        }
+
+        if let Some(offset) = self.offset {
+            lines.push(format!("- Offset: {offset}"));
+        }
+
+        if let Some((enabled, temperature)) = self.cooler {
+            lines.push(format!(
+                "- Cooler: {}, target {} C",
+                if enabled { "on" } else { "off" },
+                temperature
+            ));
+        }
+
+        if let Some((red, green, blue)) = self.white_balance {
+            lines.push(format!("- White balance: R={red}, G={green}, B={blue}"));
+        }
+
+        if let Some(contrast) = self.contrast {
+            lines.push(format!("- Contrast: {contrast}"));
+        }
+
+        if let Some(sharpness) = self.sharpness {
+            lines.push(format!("- Sharpness: {sharpness}"));
+        }
+
+        if let Some(saturation) = self.saturation {
+            lines.push(format!("- Saturation: {saturation}"));
+        }
+
+        if let Some(usb_speed) = self.usb_speed {
+            lines.push(format!("- USB speed: {usb_speed}"));
+        }
+
+        if let Some((x, y, width, height)) = self.roi {
+            lines.push(format!("- ROI: x={x}, y={y}, {}x{} px", width, height));
+        }
+
+        if let Some((horizontal, vertical)) = self.binning {
+            lines.push(format!("- Binning: {}x{}", horizontal, vertical));
+        }
+
+        lines.join("\n")
+    }
 }
 
 impl Default for VastCameraCapabilities {
@@ -192,9 +287,14 @@ impl Default for VastCameraCapabilities {
             iso: None,
             offset: None,
             cooler: None,
+            white_balance: None,
+            contrast: None,
+            sharpness: None,
+            saturation: None,
+            usb_speed: None,
             roi: None,
             binning: None,
-            guide: None,
+            guiding: None,
             frame_formats: Vec::new(),
             exposure: VastCameraCapExposure {
                 min_microseconds: 0,
@@ -222,142 +322,163 @@ pub trait VastCamera<IDT, T: VastCameraDriver> {
 
     fn connect(&mut self, camera_id: IDT) -> Result<(), VastError>;
 
-    fn camera_info_str(&self) -> String;
-
     fn get_name(&self) -> &str;
     fn get_capabilities(&self) -> VastCameraCapabilities;
 
-    fn get_current_binning(&self) -> Result<(u32, u32), VastError>;
-    fn get_current_roi(&self) -> Result<(u32, u32, u32, u32), VastError>;
-    fn get_current_gain(&self) -> u32;
-    fn get_current_iso(&self) -> u32;
     fn get_current_offset(&self) -> u32;
     fn get_current_cooler(&self) -> (bool, u32);
-    fn get_current_exposure(&self) -> u64;
+    fn get_current_temperature(&self) -> f32;
 
-    fn set_gain(&mut self, gain: u32);
-    fn set_iso(&mut self, iso: u32);
-    fn set_offset(&mut self, offset: u32);
-    fn set_cooler(&mut self, on: bool, temperature: u32);
-    fn set_roi(&mut self, x: u32, y: u32, width: u32, height: u32);
-    fn set_binning(&mut self, h: u32, v: u32);
+    fn set_camera_settings(&mut self, settings: VastCameraSettings) -> Result<(), VastError>;
+    fn get_camera_settings(&mut self) -> Result<VastCameraSettings, VastError>;
+    fn get_settings(&self) -> VastCameraSettings;
 
     fn disconnect(&mut self) -> Result<(), VastError>;
 }
 
-pub fn fancy_info_str(capabilities: &VastCameraCapabilities) -> String {
-    let mut lines = vec![
-        "Camera capabilities".to_string(),
-        format!(
-            "- Sensor: {}x{} px",
-            capabilities.max_width, capabilities.max_height
-        ),
-    ];
+impl VastCameraCapabilities {
+    pub fn fancy_info_str(&self) -> String {
+        let mut lines = vec![
+            "Camera capabilities".to_string(),
+            format!("- Sensor: {}x{} px", self.max_width, self.max_height),
+        ];
 
-    if let Some(pattern) = &capabilities.bayer_pattern {
-        lines.push("- Type: Color".to_string());
-        lines.push(format!("- Bayer pattern: {pattern}"));
-    } else {
-        lines.push("- Type: Mono".to_string());
-        lines.push("- Bayer pattern: none".to_string());
-    }
-
-    if capabilities.adc_bits > 0 {
-        lines.push(format!("- ADC: {} bit", capabilities.adc_bits));
-    }
-
-    if capabilities.frame_formats.is_empty() {
-        lines.push("- Formats: none reported".to_string());
-    } else {
-        let formats = capabilities
-            .frame_formats
-            .iter()
-            .map(ToString::to_string)
-            .collect::<Vec<_>>()
-            .join(", ");
-        lines.push(format!("- Formats: {formats}"));
-    }
-
-    if let Some(gain) = &capabilities.gain {
-        lines.push(format!(
-            "- Gain: {}..{} step {}",
-            gain.min, gain.max, gain.step
-        ));
-    }
-
-    if capabilities.exposure.max_microseconds > 0 {
-        lines.push(format!(
-            "- Exposure: {}..{} us ({}..{} ms, {:.3}..{:.3} s) step {}",
-            capabilities.exposure.min_microseconds,
-            capabilities.exposure.max_microseconds,
-            capabilities.exposure.min_milliseconds(),
-            capabilities.exposure.max_milliseconds(),
-            capabilities.exposure.min_seconds(),
-            capabilities.exposure.max_seconds(),
-            capabilities.exposure.step
-        ));
-    }
-
-    if let Some(roi) = &capabilities.roi {
-        if roi.combinations.is_empty() {
-            lines.push("- ROI: yes".to_string());
+        if let Some(pattern) = &self.bayer_pattern {
+            lines.push("- Type: Color".to_string());
+            lines.push(format!("- Bayer pattern: {pattern}"));
         } else {
-            let combinations = roi
-                .combinations
-                .iter()
-                .map(|combination| {
-                    format!(
-                        "bin {}: up to {}x{} px, step {}x{}",
-                        combination.bin,
-                        combination.max_width,
-                        combination.max_height,
-                        combination.width_step,
-                        combination.height_step
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("; ");
-            lines.push(format!("- ROI: {combinations}"));
+            lines.push("- Type: Mono".to_string());
+            lines.push("- Bayer pattern: none".to_string());
         }
-    }
 
-    if let Some(binning) = &capabilities.binning {
-        let modes = binning
-            .modes
-            .iter()
-            .map(|mode| format!("{}x{}", mode, mode))
-            .collect::<Vec<_>>()
-            .join(", ");
-        lines.push(format!("- Binning: {modes}"));
-    }
+        if self.adc_bits > 0 {
+            lines.push(format!("- ADC: {} bit", self.adc_bits));
+        }
 
-    if let Some(guide) = &capabilities.guide {
-        lines.push(format!(
-            "- Guide: pulse guide {}",
-            if guide.pulse_guide { "yes" } else { "no" }
-        ));
-    }
+        if self.frame_formats.is_empty() {
+            lines.push("- Formats: none reported".to_string());
+        } else {
+            let formats = self
+                .frame_formats
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("- Formats: {formats}"));
+        }
 
-    if let Some(iso) = &capabilities.iso {
-        lines.push(format!(
-            "- ISO: {}..{} x{}",
-            iso.min, iso.max, iso.multiplier
-        ));
-    }
+        if let Some(gain) = &self.gain {
+            lines.push(format!(
+                "- Gain: {}..{} step {}",
+                gain.min, gain.max, gain.step
+            ));
+        }
 
-    if let Some(offset) = &capabilities.offset {
-        lines.push(format!(
-            "- Offset: {}..{} step {}",
-            offset.min, offset.max, offset.step
-        ));
-    }
+        if self.exposure.max_microseconds > 0 {
+            lines.push(format!(
+                "- Exposure: {}..{} us ({}..{} ms, {:.3}..{:.3} s) step {}",
+                self.exposure.min_microseconds,
+                self.exposure.max_microseconds,
+                self.exposure.min_milliseconds(),
+                self.exposure.max_milliseconds(),
+                self.exposure.min_seconds(),
+                self.exposure.max_seconds(),
+                self.exposure.step
+            ));
+        }
 
-    if let Some(cooler) = &capabilities.cooler {
-        lines.push(format!(
-            "- Cooler: {:.1}..{:.1} C step {:.1}",
-            cooler.min, cooler.max, cooler.step
-        ));
-    }
+        if let Some(roi) = &self.roi {
+            if roi.combinations.is_empty() {
+                lines.push("- ROI: yes".to_string());
+            } else {
+                let combinations = roi
+                    .combinations
+                    .iter()
+                    .map(|combination| {
+                        format!(
+                            "bin {}: up to {}x{} px, step {}x{}",
+                            combination.bin,
+                            combination.max_width,
+                            combination.max_height,
+                            combination.width_step,
+                            combination.height_step
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                lines.push(format!("- ROI: {combinations}"));
+            }
+        }
 
-    lines.join("\n")
+        if let Some(binning) = &self.binning {
+            let modes = binning
+                .modes
+                .iter()
+                .map(|mode| format!("{}x{}", mode, mode))
+                .collect::<Vec<_>>()
+                .join(", ");
+            lines.push(format!("- Binning: {modes}"));
+        }
+
+        if let Some(white_balance) = &self.white_balance {
+            lines.push(format!(
+                "- White balance: R {}..{}, G {}..{}, B {}..{}",
+                white_balance.red.min,
+                white_balance.red.max,
+                white_balance.green.min,
+                white_balance.green.max,
+                white_balance.blue.min,
+                white_balance.blue.max
+            ));
+        }
+
+        if let Some(contrast) = &self.contrast {
+            lines.push(format!("- Contrast: {}..{}", contrast.min, contrast.max));
+        }
+
+        if let Some(sharpness) = &self.sharpness {
+            lines.push(format!("- Sharpness: {}..{}", sharpness.min, sharpness.max));
+        }
+
+        if let Some(saturation) = &self.saturation {
+            lines.push(format!(
+                "- Saturation: {}..{}",
+                saturation.min, saturation.max
+            ));
+        }
+
+        if let Some(usb_speed) = &self.usb_speed {
+            lines.push(format!("- USB speed: {}..{}", usb_speed.min, usb_speed.max));
+        }
+
+        if let Some(guiding) = &self.guiding {
+            lines.push(format!(
+                "- Guide: pulse guide {}",
+                if guiding.pulse_guide { "yes" } else { "no" }
+            ));
+        }
+
+        if let Some(iso) = &self.iso {
+            lines.push(format!(
+                "- ISO: {}..{} x{}",
+                iso.min, iso.max, iso.multiplier
+            ));
+        }
+
+        if let Some(offset) = &self.offset {
+            lines.push(format!(
+                "- Offset: {}..{} step {}",
+                offset.min, offset.max, offset.step
+            ));
+        }
+
+        if let Some(cooler) = &self.cooler {
+            lines.push(format!(
+                "- Cooler: {:.1}..{:.1} C step {:.1}",
+                cooler.min, cooler.max, cooler.step
+            ));
+        }
+
+        lines.join("\n")
+    }
 }
