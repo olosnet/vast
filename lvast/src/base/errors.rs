@@ -4,6 +4,7 @@ use std::fmt::Display;
 pub enum VastErrorType {
     CameraDriverError,
     CameraError,
+    FileError,
 }
 
 #[derive(Debug, Clone, PartialEq)]

@@ -6,6 +6,7 @@ authors = ["Valerio Faiuolo <valeriof.dev@tuta.com>"]
 
 [dependencies]
 log = "0.4"
+fits-io = "0.1"
 
 [build-dependencies]
 bindgen = "0.72.1"
