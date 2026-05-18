@@ -4,7 +4,7 @@
 pub mod base;
 /// Camera driver traits, shared camera data types, and concrete camera implementations.
 pub mod cameras;
-/// Low-level native SDK bindings used by camera drivers.
+/// Low-level native SDK bindings or native drivers used by devices.
 pub mod drivers;
 /// Image format metadata and image saver implementations.
 pub mod imageformats;

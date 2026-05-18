@@ -8,10 +8,11 @@ pub fn detect_serial_ports() -> serialport::Result<Vec<SerialPortInfo>> {
     serialport::available_ports()
 }
 
-/// Rileva porte seriali e bluetooth su Linux/Windows.
+/// Rileva porte seriali e bluetooth usabili su Linux/Windows.
 ///
-/// - Linux: include device seriali classici (`ttyUSB`, `ttyACM`, `ttyS`, `ttyAMA`,
-///   `ttyTHS`) e bluetooth seriale (`rfcomm`), oltre ai tipi riconosciuti dalla libreria.
+/// - Linux: include porte enumerabili (`ttyUSB`, `ttyACM`, `rfcomm`) e tipi riconosciuti
+///   dalla libreria. Le porte legacy/platform (`ttyS`, `ttyAMA`, `ttyTHS`) vengono escluse
+///   perché possono esistere anche senza un device collegato.
 /// - Windows: include porte `COM*` e tipi seriali/bluetooth riconosciuti.
 pub fn detect_serial_and_bluetooth_ports() -> serialport::Result<Vec<SerialPortInfo>> {
     let ports = serialport::available_ports()?;
@@ -41,9 +42,6 @@ fn is_serial_or_bluetooth_port(port: &SerialPortInfo) -> bool {
                 let name = port.port_name.as_str();
                 return name.starts_with("/dev/ttyUSB")
                     || name.starts_with("/dev/ttyACM")
-                    || name.starts_with("/dev/ttyS")
-                    || name.starts_with("/dev/ttyAMA")
-                    || name.starts_with("/dev/ttyTHS")
                     || name.starts_with("/dev/rfcomm");
             }
 
