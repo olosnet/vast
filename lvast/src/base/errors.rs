@@ -9,6 +9,8 @@ pub enum VastErrorType {
     CameraError,
     /// Error while reading or writing files.
     FileError,
+    /// Generic connection or worker-channel error.
+    ConnectionError,
     /// Invalid input or configuration.
     InvalidInput,
     /// Connection was refused serial device.

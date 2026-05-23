@@ -12,7 +12,7 @@ pub struct ConnectionParams {
     pub baud: u32,
 }
 
-pub trait Connection {
+pub trait Connection: Send {
     fn new(params: &ConnectionParams) -> VastResult<Self>
     where
         Self: Sized;
