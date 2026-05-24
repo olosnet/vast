@@ -150,6 +150,37 @@ fn set_horizon_limit_rejects_invalid_value_without_io() {
 }
 
 #[test]
+fn utc_offset_minutes_round_trip_uses_onstep_sign_and_fractional_format() {
+    let (mut client, state) = build_client(&["1#", "+5:30#"]);
+
+    let set_result = client.set_utc_offset_minutes(-330);
+    let get_result = client.get_utc_offset_minutes();
+
+    assert_eq!(set_result.unwrap(), true);
+    assert_eq!(get_result.unwrap(), -330);
+    assert_eq!(
+        state.lock().unwrap().sent_commands,
+        vec![":SG+05:30#", ":GG#"]
+    );
+}
+
+#[test]
+fn utc_offset_minutes_rejects_unsupported_fraction_without_io() {
+    let (mut client, state) = build_client(&[]);
+
+    let result = client.set_utc_offset_minutes(15);
+
+    assert!(matches!(
+        result,
+        Err(VastError {
+            error_type: VastErrorType::InvalidInput,
+            ..
+        })
+    ));
+    assert!(state.lock().unwrap().sent_commands.is_empty());
+}
+
+#[test]
 fn onstep_client_is_send() {
     assert_send::<OnStepClient>();
 }

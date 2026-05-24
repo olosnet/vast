@@ -147,6 +147,61 @@ impl OnStepClient {
         VastError::new(VastErrorType::InvalidInput, message.into())
     }
 
+    fn parse_onstep_utc_offset_minutes(value: &str) -> VastResult<i32> {
+        let trimmed = value.trim();
+        let (sign, unsigned) = if let Some(rest) = trimmed.strip_prefix('-') {
+            (-1, rest)
+        } else if let Some(rest) = trimmed.strip_prefix('+') {
+            (1, rest)
+        } else {
+            (1, trimmed)
+        };
+
+        let (hours_str, minutes) = if let Some((hours, minutes_str)) = unsigned.split_once(':') {
+            let minutes = match minutes_str {
+                "00" => 0,
+                "30" => 30,
+                "45" => 45,
+                _ => {
+                    return Err(Self::invalid_input(format!(
+                        "Invalid UTC offset minutes '{}': {}",
+                        value, minutes_str
+                    )));
+                }
+            };
+            (hours, minutes)
+        } else {
+            (unsigned, 0)
+        };
+
+        let hours = hours_str.parse::<i32>().map_err(|err| {
+            Self::invalid_input(format!("Invalid UTC offset '{}': {}", value, err))
+        })?;
+
+        Ok(sign * (hours.abs() * 60 + minutes))
+    }
+
+    fn format_onstep_utc_offset_minutes(utc_offset_minutes: i32) -> VastResult<String> {
+        let onstep_offset_minutes = -utc_offset_minutes;
+        let sign = if onstep_offset_minutes < 0 { '-' } else { '+' };
+        let absolute_minutes = onstep_offset_minutes.abs();
+        let hours = absolute_minutes / 60;
+        let minutes = absolute_minutes % 60;
+
+        if !matches!(minutes, 0 | 30 | 45) {
+            return Err(Self::invalid_input(format!(
+                "OnStep supports only whole-hour, half-hour, or 45-minute UTC offsets, got {} minutes",
+                utc_offset_minutes
+            )));
+        }
+
+        if minutes == 0 {
+            Ok(format!("{sign}{hours}"))
+        } else {
+            Ok(format!("{sign}{hours:02}:{minutes:02}"))
+        }
+    }
+
     fn send_request(&self, command: &str) -> VastResult<()> {
         let (response_tx, response_rx) = mpsc::channel();
         self.worker_tx
@@ -213,25 +268,8 @@ impl OnStepClient {
 
         let s = self.send_command_result(":GU#")?;
 
-        if s.contains('n') && s.contains('N') {
-            self.is_slewing = false;
-            self.is_tracking = false;
-        }
-
-        if !s.contains('n') && !s.contains('N') {
-            self.is_slewing = true;
-            self.is_tracking = false;
-        }
-
-        if !s.contains('n') && s.contains('N') {
-            self.is_slewing = false;
-            self.is_tracking = true;
-        }
-
-        if s.contains('n') && !s.contains('N') {
-            self.is_slewing = true;
-            self.is_tracking = false;
-        }
+        self.is_tracking = !s.contains('n');
+        self.is_slewing = !s.contains('N');
 
         if s.contains('P') {
             self.is_parked = true;
@@ -355,6 +393,30 @@ impl OnStepClient {
         Ok(())
     }
 
+    /// Returns cached tracking state from last `:GU#` refresh.
+    pub fn is_tracking(&self) -> bool {
+        self.is_tracking
+    }
+
+    /// Returns cached slewing state from last `:GU#` refresh.
+    pub fn is_slewing(&self) -> bool {
+        self.is_slewing
+    }
+
+    /// Returns cached parked state from last `:GU#` refresh.
+    pub fn is_parked(&self) -> bool {
+        self.is_parked
+    }
+
+    /// Returns cached pier side from last `:GU#` refresh.
+    pub fn pier_side(&self) -> Option<&str> {
+        match self.pier_side.as_str() {
+            "East" => Some("East"),
+            "West" => Some("West"),
+            _ => None,
+        }
+    }
+
     /// Reads current tracking rate.
     ///
     /// Returns an error if the response cannot be parsed.
@@ -383,6 +445,35 @@ impl OnStepClient {
     /// Disables tracking.
     pub fn tracking_off(&mut self) -> VastResult<String> {
         self.send_command_result(":Td#")
+    }
+
+    /// Selects sidereal tracking rate.
+    pub fn tracking_sidereal(&mut self) -> VastResult<()> {
+        self.send_request(":TQ#")
+    }
+
+    /// Selects solar tracking rate.
+    pub fn tracking_solar(&mut self) -> VastResult<()> {
+        self.send_request(":TS#")
+    }
+
+    /// Selects lunar tracking rate.
+    pub fn tracking_lunar(&mut self) -> VastResult<()> {
+        self.send_request(":TL#")
+    }
+
+    /// Sets custom tracking rate in OnStep `:ST...#` units.
+    pub fn set_tracking_rate(&mut self, rate_hz: f32) -> VastResult<bool> {
+        if !rate_hz.is_finite() {
+            return Err(Self::invalid_input(format!(
+                "Invalid OnStep tracking rate: {}",
+                rate_hz
+            )));
+        }
+
+        let command = format!(":ST{rate_hz:.5}#");
+        let s = self.send_command_result(&command)?;
+        Ok(s == "1")
     }
 
     /// Sets target azimuth.
@@ -569,25 +660,27 @@ impl OnStepClient {
         self.send_command_result(":GX04#")
     }
 
-    /// Sets UTC offset and returns `true` on OnStep success response.
-    pub fn set_utc_offset(&mut self, offset: i16) -> VastResult<bool> {
+    /// Sets signed local civil-time offset from UTC in minutes.
+    ///
+    /// OnStep expects opposite sign: number of hours to add to local time to obtain UTC.
+    pub fn set_utc_offset_minutes(&mut self, utc_offset_minutes: i32) -> VastResult<bool> {
+        let offset = Self::format_onstep_utc_offset_minutes(utc_offset_minutes)?;
         let command = format!(":SG{offset}#");
         let s = self.send_command_result_with_delay(&command, Duration::from_secs(1))?;
         Ok(s == "1")
     }
 
-    /// Reads UTC offset.
+    /// Reads signed local civil-time offset from UTC in minutes.
     ///
     /// Returns an error if the response cannot be parsed.
-    pub fn get_utc_offset(&mut self) -> VastResult<i16> {
+    pub fn get_utc_offset_minutes(&mut self) -> VastResult<i32> {
         let rx = self.send_command_result(":GG#")?;
-        rx.parse::<i16>()
-            .map_err(|err| Self::invalid_input(format!("Invalid UTC offset '{}': {}", rx, err)))
+        Self::parse_onstep_utc_offset_minutes(&rx).map(|minutes| -minutes)
     }
 
-    /// Sets mount date and returns `true` on OnStep success response.
-    pub fn set_date(&mut self, date: DateTime<Utc>) -> VastResult<bool> {
-        let command = format!(":SC{}#", date.format("%m/%d/%Y"));
+    /// Sets mount local date and returns `true` on OnStep success response.
+    pub fn set_local_date(&mut self, date: DateTime<Utc>) -> VastResult<bool> {
+        let command = format!(":SC{}#", date.format("%m/%d/%y"));
         let s = self.send_command_result_with_delay(&command, Duration::from_secs(4))?;
         Ok(s == "1")
     }
@@ -597,8 +690,8 @@ impl OnStepClient {
         self.send_command_result(":GC#")
     }
 
-    /// Sets mount time and returns `true` on OnStep success response.
-    pub fn set_time(&mut self, time: DateTime<Utc>) -> VastResult<bool> {
+    /// Sets mount local time and returns `true` on OnStep success response.
+    pub fn set_local_time(&mut self, time: DateTime<Utc>) -> VastResult<bool> {
         let command = format!(":SL{}#", time.format("%H:%M:%S"));
         let s = self.send_command_result_with_delay(&command, Duration::from_secs(3))?;
         Ok(s == "1")

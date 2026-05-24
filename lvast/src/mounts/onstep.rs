@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{Duration, Utc};
 
 use crate::{
     algos::convert::{j2000_to_jnow, jnow_to_j2000},
@@ -7,7 +7,10 @@ use crate::{
         errors::{VastError, VastErrorType, VastResult},
     },
     drivers::native::onstep::driver::OnStepClient,
-    mounts::{VastMount, VastMountCurrStatus, VastMountSettings, VastTrackingMode},
+    mounts::{
+        VastMount, VastMountCurrStatus, VastMountPierSide, VastMountSettings, VastMountStatus,
+        VastTrackingMode,
+    },
     types::common::EquatorialDegrees,
 };
 
@@ -17,6 +20,8 @@ pub struct OnStepVastMount {
 }
 
 impl OnStepVastMount {
+    const ONSTEP_SIDEREAL_RATE_HZ: f32 = 60.0 * 1.002_737_9;
+
     fn client_mut(&mut self) -> VastResult<&mut OnStepClient> {
         self.client.as_mut().ok_or_else(|| {
             VastError::new(
@@ -96,11 +101,19 @@ impl OnStepVastMount {
 
     fn parse_mount_tracking_mode(rate: f32) -> VastTrackingMode {
         const EPSILON: f32 = 0.01;
+        let normalized_rate = Self::normalize_tracking_rate(rate);
 
         let candidates = [
-            (VastTrackingMode::Sidereal, (rate - 1.0).abs()),
-            (VastTrackingMode::Solar, (rate - 0.997_269_6).abs()),
-            (VastTrackingMode::Lunar, (rate - 1.035_05).abs()),
+            (VastTrackingMode::Sidereal, (normalized_rate - 1.0).abs()),
+            (
+                VastTrackingMode::Solar,
+                (normalized_rate - 0.997_269_6).abs(),
+            ),
+            (
+                VastTrackingMode::Lunar,
+                (normalized_rate - 0.962_365_15).abs(),
+            ),
+            (VastTrackingMode::Lunar, (normalized_rate - 1.035_05).abs()),
         ];
 
         candidates
@@ -108,6 +121,113 @@ impl OnStepVastMount {
             .min_by(|(_, lhs), (_, rhs)| lhs.total_cmp(rhs))
             .and_then(|(mode, delta)| (delta < EPSILON).then_some(mode))
             .unwrap_or(VastTrackingMode::Custom)
+    }
+
+    fn normalize_tracking_rate(rate: f32) -> f32 {
+        if rate.abs() > 10.0 {
+            rate / Self::ONSTEP_SIDEREAL_RATE_HZ
+        } else {
+            rate
+        }
+    }
+
+    fn tracking_rate_to_onstep_hz(rate: f32) -> f32 {
+        if rate.abs() > 10.0 {
+            rate
+        } else {
+            rate * Self::ONSTEP_SIDEREAL_RATE_HZ
+        }
+    }
+
+    fn validate_tracking_settings(settings: &VastMountSettings) -> VastResult<()> {
+        if settings.tracking_mode() == VastTrackingMode::Custom
+            && settings.custom_tracking_value() <= 0
+        {
+            return Err(VastError::new(
+                VastErrorType::InvalidInput,
+                "Custom tracking mode requires a positive custom_tracking_value".to_string(),
+            ));
+        }
+
+        Ok(())
+    }
+
+    fn local_datetime_from_utc(
+        datetime_utc: chrono::DateTime<Utc>,
+        utc_offset_minutes: i32,
+    ) -> VastResult<chrono::DateTime<Utc>> {
+        datetime_utc
+            .checked_add_signed(Duration::minutes(i64::from(utc_offset_minutes)))
+            .ok_or_else(|| {
+                VastError::new(
+                    VastErrorType::InvalidInput,
+                    format!(
+                        "UTC offset {} minutes overflows local mount time conversion",
+                        utc_offset_minutes
+                    ),
+                )
+            })
+    }
+
+    fn apply_tracking_mode(
+        client: &mut OnStepClient,
+        settings: &VastMountSettings,
+    ) -> VastResult<()> {
+        match settings.tracking_mode() {
+            VastTrackingMode::Off => {
+                client.tracking_off()?;
+            }
+            VastTrackingMode::Sidereal => {
+                client.tracking_sidereal()?;
+                client.tracking_on()?;
+            }
+            VastTrackingMode::Solar => {
+                client.tracking_solar()?;
+                client.tracking_on()?;
+            }
+            VastTrackingMode::Lunar => {
+                client.tracking_lunar()?;
+                client.tracking_on()?;
+            }
+            VastTrackingMode::Custom => {
+                let normalized_rate = settings.custom_tracking_value() as f32 / 1000.0;
+                let tracking_rate_hz = Self::tracking_rate_to_onstep_hz(normalized_rate);
+
+                if !client.set_tracking_rate(tracking_rate_hz)? {
+                    return Err(VastError::new(
+                        VastErrorType::InvalidInput,
+                        format!(
+                            "OnStep rejected custom tracking rate {:.5} Hz",
+                            tracking_rate_hz
+                        ),
+                    ));
+                }
+
+                client.tracking_on()?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn map_pier_side(client: &OnStepClient) -> Option<VastMountPierSide> {
+        match client.pier_side() {
+            Some("East") => Some(VastMountPierSide::East),
+            Some("West") => Some(VastMountPierSide::West),
+            _ => None,
+        }
+    }
+
+    fn map_mount_status(client: &OnStepClient) -> VastMountStatus {
+        if client.is_parked() {
+            VastMountStatus::Parked
+        } else if client.is_slewing() {
+            VastMountStatus::Slewing
+        } else if client.is_tracking() {
+            VastMountStatus::Tracking
+        } else {
+            VastMountStatus::Stopped
+        }
     }
 }
 
@@ -147,20 +267,26 @@ impl VastMount for OnStepVastMount {
     fn get_current_settings(&mut self) -> VastResult<VastMountSettings> {
         let now = Utc::now();
         let client = self.client_mut()?;
+        client.update_status()?;
 
-        let tracking_mode = Self::parse_mount_tracking_mode(client.get_tracking_rate()?);
+        let tracking_rate = client.get_tracking_rate()?;
+        let tracking_mode = if client.is_tracking() {
+            Self::parse_mount_tracking_mode(tracking_rate)
+        } else {
+            VastTrackingMode::Off
+        };
         let custom_tracking_value = if tracking_mode == VastTrackingMode::Custom {
-            (client.get_tracking_rate()? * 1000.0).round() as i32
+            (Self::normalize_tracking_rate(tracking_rate) * 1000.0).round() as i32
         } else {
             0
         };
 
         let settings = VastMountSettings::new(
-            false,
+            client.is_parked(),
             tracking_mode,
             custom_tracking_value,
             now,
-            client.get_utc_offset()?.unsigned_abs() as u8,
+            client.get_utc_offset_minutes()?,
             f64::from(client.get_longitude()?),
             f64::from(client.get_latitude()?),
         );
@@ -182,13 +308,17 @@ impl VastMount for OnStepVastMount {
             dec_jnow,
             crate::algos::convert::datetime_to_julian_day(settings.datetime()),
         );
+        let status = Self::map_mount_status(client);
+        let park_mode = client.is_parked();
+        let pier_side = Self::map_pier_side(client);
 
         Ok(VastMountCurrStatus::new(
-            settings.tracking_mode() != VastTrackingMode::Off,
-            settings.park_mode(),
+            status,
+            park_mode,
             EquatorialDegrees::from_ra_hours_dec_degrees(ra_j2000, dec_j2000),
             alt,
             azm,
+            pier_side,
         ))
     }
 
@@ -217,31 +347,18 @@ impl VastMount for OnStepVastMount {
     }
 
     fn set_settings(&mut self, settings: VastMountSettings) -> VastResult<()> {
+        Self::validate_tracking_settings(&settings)?;
         let client = self.client_mut()?;
+        let local_datetime =
+            Self::local_datetime_from_utc(settings.datetime(), settings.utc_offset_minutes())?;
 
-        client.set_utc_offset(i16::from(settings.timezone_offset()))?;
-        client.set_date(settings.datetime())?;
-        client.set_time(settings.datetime())?;
+        client.set_utc_offset_minutes(settings.utc_offset_minutes())?;
+        client.set_local_date(local_datetime)?;
+        client.set_local_time(local_datetime)?;
         client.set_longitude(settings.longitude() as f32)?;
         client.set_latitude(settings.latitude() as f32)?;
 
-        match settings.tracking_mode() {
-            VastTrackingMode::Off => {
-                client.tracking_off()?;
-            }
-            VastTrackingMode::Sidereal => {
-                client.tracking_on()?;
-            }
-            VastTrackingMode::Solar | VastTrackingMode::Lunar | VastTrackingMode::Custom => {
-                return Err(VastError::new(
-                    VastErrorType::InvalidInput,
-                    format!(
-                        "OnStepVastMount does not yet support setting tracking mode '{}' through VastMountSettings",
-                        settings.tracking_mode()
-                    ),
-                ));
-            }
-        }
+        Self::apply_tracking_mode(client, &settings)?;
 
         self.current_settings = settings;
         Ok(())

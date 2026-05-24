@@ -149,8 +149,24 @@ fn tracking_rate_mapping_matches_known_modes() {
         VastTrackingMode::Sidereal
     );
     assert_eq!(
+        OnStepVastMount::parse_mount_tracking_mode(OnStepVastMount::ONSTEP_SIDEREAL_RATE_HZ),
+        VastTrackingMode::Sidereal
+    );
+    assert_eq!(
         OnStepVastMount::parse_mount_tracking_mode(0.997_269_6),
         VastTrackingMode::Solar
+    );
+    assert_eq!(
+        OnStepVastMount::parse_mount_tracking_mode(60.0),
+        VastTrackingMode::Solar
+    );
+    assert_eq!(
+        OnStepVastMount::parse_mount_tracking_mode(0.962_365_15),
+        VastTrackingMode::Lunar
+    );
+    assert_eq!(
+        OnStepVastMount::parse_mount_tracking_mode(57.9),
+        VastTrackingMode::Lunar
     );
     assert_eq!(
         OnStepVastMount::parse_mount_tracking_mode(1.035_05),
@@ -205,19 +221,45 @@ fn goto_returns_error_for_failed_slew() {
 
 #[test]
 fn get_current_settings_maps_custom_tracking_rate() {
-    let (mut mount, state) = build_mount(&["1.2345#", "1.2345#", "-3#", "11.25#", "45.5#"]);
+    let custom_tracking_rate_hz = 74.3;
+    let (mut mount, state) = build_mount(&["pN#", "74.3#", "+5:30#", "11.25#", "45.5#"]);
 
     let settings = mount.get_current_settings().unwrap();
 
     assert_eq!(settings.tracking_mode(), VastTrackingMode::Custom);
-    assert_eq!(settings.custom_tracking_value(), 1235);
-    assert_eq!(settings.timezone_offset(), 3);
+    assert_eq!(
+        settings.custom_tracking_value(),
+        (OnStepVastMount::normalize_tracking_rate(custom_tracking_rate_hz) * 1000.0).round() as i32
+    );
+    assert_eq!(settings.utc_offset_minutes(), -330);
+    assert!(!settings.park_mode());
     assert_eq!(settings.longitude(), 11.25);
     assert_eq!(settings.latitude(), 45.5);
     assert_eq!(
         sent_commands(&state),
         vec![
+            ":GU#".to_string(),
             ":GT#".to_string(),
+            ":GG#".to_string(),
+            ":Gg#".to_string(),
+            ":Gt#".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn get_current_settings_reports_off_when_mount_not_tracking() {
+    let (mut mount, state) = build_mount(&["pnN#", "1.0#", "+5:30#", "11.25#", "45.5#"]);
+
+    let settings = mount.get_current_settings().unwrap();
+
+    assert_eq!(settings.tracking_mode(), VastTrackingMode::Off);
+    assert_eq!(settings.custom_tracking_value(), 0);
+    assert_eq!(settings.utc_offset_minutes(), -330);
+    assert_eq!(
+        sent_commands(&state),
+        vec![
+            ":GU#".to_string(),
             ":GT#".to_string(),
             ":GG#".to_string(),
             ":Gg#".to_string(),
@@ -234,17 +276,18 @@ fn get_current_status_converts_coordinates_and_maps_fields() {
     let ra_response = format!("{}#", OnStepVastMount::format_ra_hours(ra_jnow));
     let dec_response = format!("{}#", OnStepVastMount::format_signed_degrees(dec_jnow));
     let responses = [
+        "pNT#",
         "1.0#",
         "0#",
         "11.5#",
         "45.0#",
-        "PN#",
+        "pNT#",
         &ra_response,
-        "PN#",
+        "pNT#",
         &dec_response,
-        "PN#",
+        "pNT#",
         "+45:30:00#",
-        "PN#",
+        "pNT#",
         "+120:15:30#",
     ];
     let (mut mount, state) = build_mount(&responses);
@@ -252,8 +295,12 @@ fn get_current_status_converts_coordinates_and_maps_fields() {
     let status = mount.get_current_status().unwrap();
     let (ra_hours, dec_deg) = status.coords_j2000().to_ra_hours_dec_degrees();
 
+    assert_eq!(status.status(), VastMountStatus::Tracking);
     assert!(status.is_tracking());
     assert!(!status.park_mode());
+    assert!(!status.is_parked());
+    assert!(!status.is_slewing());
+    assert_eq!(status.pier_side(), Some(VastMountPierSide::East));
     assert!((status.altitude() - 45.5).abs() < 1e-12);
     assert!((status.azimuth() - 120.258_333_333_333_34).abs() < 1e-12);
     assert!(ra_error_arcsec(ra_hours, 5.25, 20.5) < 15.0);
@@ -261,6 +308,7 @@ fn get_current_status_converts_coordinates_and_maps_fields() {
     assert_eq!(
         sent_commands(&state),
         vec![
+            ":GU#".to_string(),
             ":GT#".to_string(),
             ":GG#".to_string(),
             ":Gg#".to_string(),
@@ -280,6 +328,118 @@ fn get_current_status_converts_coordinates_and_maps_fields() {
 }
 
 #[test]
+fn get_current_status_uses_live_tracking_and_park_state() {
+    let responses = [
+        "PnNT#",
+        "1.0#",
+        "0#",
+        "0#",
+        "0#",
+        "PnNT#",
+        "00:00:00#",
+        "PnNT#",
+        "+00:00:00#",
+        "PnNT#",
+        "+00:00:00#",
+        "PnNT#",
+        "+00:00:00#",
+    ];
+    let (mut mount, _) = build_mount(&responses);
+
+    let status = mount.get_current_status().unwrap();
+
+    assert_eq!(status.status(), VastMountStatus::Parked);
+    assert!(!status.is_tracking());
+    assert!(status.park_mode());
+    assert!(status.is_parked());
+    assert!(!status.is_slewing());
+    assert_eq!(status.pier_side(), Some(VastMountPierSide::East));
+}
+
+#[test]
+fn get_current_status_maps_slewing_state() {
+    let responses = [
+        "pT#",
+        "1.0#",
+        "0#",
+        "0#",
+        "0#",
+        "pT#",
+        "00:00:00#",
+        "pT#",
+        "+00:00:00#",
+        "pT#",
+        "+00:00:00#",
+        "pT#",
+        "+00:00:00#",
+    ];
+    let (mut mount, _) = build_mount(&responses);
+
+    let status = mount.get_current_status().unwrap();
+
+    assert_eq!(status.status(), VastMountStatus::Slewing);
+    assert!(!status.is_tracking());
+    assert!(!status.park_mode());
+    assert!(!status.is_parked());
+    assert!(status.is_slewing());
+    assert_eq!(status.pier_side(), Some(VastMountPierSide::East));
+}
+
+#[test]
+fn get_current_status_maps_stopped_state() {
+    let responses = [
+        "pnNT#",
+        "1.0#",
+        "0#",
+        "0#",
+        "0#",
+        "pnNT#",
+        "00:00:00#",
+        "pnNT#",
+        "+00:00:00#",
+        "pnNT#",
+        "+00:00:00#",
+        "pnNT#",
+        "+00:00:00#",
+    ];
+    let (mut mount, _) = build_mount(&responses);
+
+    let status = mount.get_current_status().unwrap();
+
+    assert_eq!(status.status(), VastMountStatus::Stopped);
+    assert!(!status.is_tracking());
+    assert!(!status.park_mode());
+    assert!(!status.is_parked());
+    assert!(!status.is_slewing());
+    assert_eq!(status.pier_side(), Some(VastMountPierSide::East));
+}
+
+#[test]
+fn get_current_status_leaves_pier_side_empty_when_onstep_reports_none() {
+    let responses = [
+        "pnoN#",
+        "1.0#",
+        "0#",
+        "0#",
+        "0#",
+        "pnoN#",
+        "00:00:00#",
+        "pnoN#",
+        "+00:00:00#",
+        "pnoN#",
+        "+00:00:00#",
+        "pnoN#",
+        "+00:00:00#",
+    ];
+    let (mut mount, _) = build_mount(&responses);
+
+    let status = mount.get_current_status().unwrap();
+
+    assert_eq!(status.status(), VastMountStatus::Stopped);
+    assert_eq!(status.pier_side(), None);
+}
+
+#[test]
 fn set_settings_sends_expected_commands_for_sidereal_tracking() {
     let datetime = Utc
         .with_ymd_and_hms(2026, 5, 24, 12, 34, 56)
@@ -290,7 +450,7 @@ fn set_settings_sends_expected_commands_for_sidereal_tracking() {
         VastTrackingMode::Sidereal,
         0,
         datetime,
-        2,
+        -120,
         11.5,
         45.25,
     );
@@ -306,12 +466,158 @@ fn set_settings_sends_expected_commands_for_sidereal_tracking() {
     assert_eq!(
         sent_commands(&state),
         vec![
-            ":SG2#".to_string(),
-            ":SC05/24/2026#".to_string(),
-            ":SL12:34:56#".to_string(),
+            ":SG+2#".to_string(),
+            ":SC05/24/26#".to_string(),
+            ":SL10:34:56#".to_string(),
             ":Sg11.5#".to_string(),
             ":St45.25#".to_string(),
+            ":TQ#".to_string(),
             ":Te#".to_string(),
         ]
     );
+}
+
+#[test]
+fn set_settings_sends_expected_commands_for_solar_tracking() {
+    let datetime = Utc
+        .with_ymd_and_hms(2026, 5, 24, 12, 34, 56)
+        .single()
+        .unwrap();
+    let settings =
+        VastMountSettings::new(false, VastTrackingMode::Solar, 0, datetime, 60, 11.5, 45.25);
+    let (mut mount, state) = build_mount(&["1#", "1#", "1#", "1#", "1#", "1#"]);
+
+    mount.set_settings(settings).unwrap();
+
+    assert_eq!(
+        sent_commands(&state),
+        vec![
+            ":SG-1#".to_string(),
+            ":SC05/24/26#".to_string(),
+            ":SL13:34:56#".to_string(),
+            ":Sg11.5#".to_string(),
+            ":St45.25#".to_string(),
+            ":TS#".to_string(),
+            ":Te#".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn set_settings_sends_expected_commands_for_lunar_tracking() {
+    let datetime = Utc
+        .with_ymd_and_hms(2026, 5, 24, 12, 34, 56)
+        .single()
+        .unwrap();
+    let settings = VastMountSettings::new(
+        false,
+        VastTrackingMode::Lunar,
+        0,
+        datetime,
+        345,
+        11.5,
+        45.25,
+    );
+    let (mut mount, state) = build_mount(&["1#", "1#", "1#", "1#", "1#", "1#"]);
+
+    mount.set_settings(settings).unwrap();
+
+    assert_eq!(
+        sent_commands(&state),
+        vec![
+            ":SG-05:45#".to_string(),
+            ":SC05/24/26#".to_string(),
+            ":SL18:19:56#".to_string(),
+            ":Sg11.5#".to_string(),
+            ":St45.25#".to_string(),
+            ":TL#".to_string(),
+            ":Te#".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn set_settings_sends_expected_commands_for_custom_tracking() {
+    let datetime = Utc
+        .with_ymd_and_hms(2026, 5, 24, 12, 34, 56)
+        .single()
+        .unwrap();
+    let settings = VastMountSettings::new(
+        false,
+        VastTrackingMode::Custom,
+        1235,
+        datetime,
+        -330,
+        11.5,
+        45.25,
+    );
+    let tracking_rate_hz = OnStepVastMount::tracking_rate_to_onstep_hz(1.235);
+    let (mut mount, state) = build_mount(&["1#", "1#", "1#", "1#", "1#", "1#", "1#"]);
+
+    mount.set_settings(settings).unwrap();
+
+    assert_eq!(
+        sent_commands(&state),
+        vec![
+            ":SG+05:30#".to_string(),
+            ":SC05/24/26#".to_string(),
+            ":SL07:04:56#".to_string(),
+            ":Sg11.5#".to_string(),
+            ":St45.25#".to_string(),
+            format!(":ST{tracking_rate_hz:.5}#"),
+            ":Te#".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn set_settings_rejects_invalid_custom_tracking_without_io() {
+    let datetime = Utc
+        .with_ymd_and_hms(2026, 5, 24, 12, 34, 56)
+        .single()
+        .unwrap();
+    let settings = VastMountSettings::new(
+        false,
+        VastTrackingMode::Custom,
+        0,
+        datetime,
+        60,
+        11.5,
+        45.25,
+    );
+    let (mut mount, state) = build_mount(&[]);
+
+    let error = mount.set_settings(settings).unwrap_err();
+
+    assert_eq!(error.error_type, VastErrorType::InvalidInput);
+    assert!(error.message.contains("positive custom_tracking_value"));
+    assert!(sent_commands(&state).is_empty());
+}
+
+#[test]
+fn set_settings_rejects_unsupported_timezone_offset_without_io() {
+    let datetime = Utc
+        .with_ymd_and_hms(2026, 5, 24, 12, 34, 56)
+        .single()
+        .unwrap();
+    let settings = VastMountSettings::new(
+        false,
+        VastTrackingMode::Sidereal,
+        0,
+        datetime,
+        15,
+        11.5,
+        45.25,
+    );
+    let (mut mount, state) = build_mount(&[]);
+
+    let error = mount.set_settings(settings).unwrap_err();
+
+    assert_eq!(error.error_type, VastErrorType::InvalidInput);
+    assert!(
+        error
+            .message
+            .contains("whole-hour, half-hour, or 45-minute")
+    );
+    assert!(sent_commands(&state).is_empty());
 }
