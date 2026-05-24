@@ -17,19 +17,19 @@ pub struct SVBVastCameraDriver {
     sdk_lock: Mutex<()>,
 }
 
-impl From<crate::drivers::bindings::svb::SVB_BAYER_PATTERN> for CameraBayerPattern {
-    fn from(pattern: crate::drivers::bindings::svb::SVB_BAYER_PATTERN) -> Self {
+impl From<crate::drivers::bindings::svb::driver::SVB_BAYER_PATTERN> for CameraBayerPattern {
+    fn from(pattern: crate::drivers::bindings::svb::driver::SVB_BAYER_PATTERN) -> Self {
         match pattern {
-            crate::drivers::bindings::svb::SVB_BAYER_PATTERN_SVB_BAYER_RG => {
+            crate::drivers::bindings::svb::driver::SVB_BAYER_PATTERN_SVB_BAYER_RG => {
                 CameraBayerPattern::RGGB
             }
-            crate::drivers::bindings::svb::SVB_BAYER_PATTERN_SVB_BAYER_BG => {
+            crate::drivers::bindings::svb::driver::SVB_BAYER_PATTERN_SVB_BAYER_BG => {
                 CameraBayerPattern::BGGR
             }
-            crate::drivers::bindings::svb::SVB_BAYER_PATTERN_SVB_BAYER_GR => {
+            crate::drivers::bindings::svb::driver::SVB_BAYER_PATTERN_SVB_BAYER_GR => {
                 CameraBayerPattern::GRBG
             }
-            crate::drivers::bindings::svb::SVB_BAYER_PATTERN_SVB_BAYER_GB => {
+            crate::drivers::bindings::svb::driver::SVB_BAYER_PATTERN_SVB_BAYER_GB => {
                 CameraBayerPattern::GBRG
             }
             _ => CameraBayerPattern::RGGB,
@@ -37,18 +37,36 @@ impl From<crate::drivers::bindings::svb::SVB_BAYER_PATTERN> for CameraBayerPatte
     }
 }
 
-impl From<crate::drivers::bindings::svb::SVB_IMG_TYPE> for CameraFrameFormat {
-    fn from(value: crate::drivers::bindings::svb::SVB_IMG_TYPE) -> Self {
+impl From<crate::drivers::bindings::svb::driver::SVB_IMG_TYPE> for CameraFrameFormat {
+    fn from(value: crate::drivers::bindings::svb::driver::SVB_IMG_TYPE) -> Self {
         match value {
-            crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_RAW8 => CameraFrameFormat::RAW8,
-            crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_RAW10 => CameraFrameFormat::RAW10,
-            crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_RAW12 => CameraFrameFormat::RAW12,
-            crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_RAW14 => CameraFrameFormat::RAW14,
-            crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_RAW16 => CameraFrameFormat::RAW16,
-            crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_RGB24 => CameraFrameFormat::RGB24,
-            crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_RGB32 => CameraFrameFormat::RGB32,
-            crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_Y8 => CameraFrameFormat::RAW8,
-            crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_Y16 => CameraFrameFormat::RAW16,
+            crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_RAW8 => {
+                CameraFrameFormat::RAW8
+            }
+            crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_RAW10 => {
+                CameraFrameFormat::RAW10
+            }
+            crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_RAW12 => {
+                CameraFrameFormat::RAW12
+            }
+            crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_RAW14 => {
+                CameraFrameFormat::RAW14
+            }
+            crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_RAW16 => {
+                CameraFrameFormat::RAW16
+            }
+            crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_RGB24 => {
+                CameraFrameFormat::RGB24
+            }
+            crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_RGB32 => {
+                CameraFrameFormat::RGB32
+            }
+            crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_Y8 => {
+                CameraFrameFormat::RAW8
+            }
+            crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_Y16 => {
+                CameraFrameFormat::RAW16
+            }
             _ => CameraFrameFormat::RAW8,
         }
     }
@@ -56,59 +74,79 @@ impl From<crate::drivers::bindings::svb::SVB_IMG_TYPE> for CameraFrameFormat {
 
 fn svb_error_code_to_string(code: u32) -> &'static str {
     match code {
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_INVALID_INDEX => "INVALID_INDEX",
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_INVALID_ID => "INVALID_ID",
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_INVALID_CONTROL_TYPE => {
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_INVALID_INDEX => {
+            "INVALID_INDEX"
+        }
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_INVALID_ID => "INVALID_ID",
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_INVALID_CONTROL_TYPE => {
             "INVALID_CONTROL_TYPE"
         }
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_CAMERA_CLOSED => "CAMERA_CLOSED",
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_CAMERA_REMOVED => "CAMERA_REMOVED",
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_INVALID_PATH => "INVALID_PATH",
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_INVALID_FILEFORMAT => {
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_CAMERA_CLOSED => {
+            "CAMERA_CLOSED"
+        }
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_CAMERA_REMOVED => {
+            "CAMERA_REMOVED"
+        }
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_INVALID_PATH => {
+            "INVALID_PATH"
+        }
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_INVALID_FILEFORMAT => {
             "INVALID_FILEFORMAT"
         }
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_INVALID_SIZE => "INVALID_SIZE",
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_INVALID_IMGTYPE => {
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_INVALID_SIZE => {
+            "INVALID_SIZE"
+        }
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_INVALID_IMGTYPE => {
             "INVALID_IMGTYPE"
         }
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_OUTOF_BOUNDARY => "OUTOF_BOUNDARY",
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_TIMEOUT => "TIMEOUT",
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_INVALID_SEQUENCE => {
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_OUTOF_BOUNDARY => {
+            "OUTOF_BOUNDARY"
+        }
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_TIMEOUT => "TIMEOUT",
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_INVALID_SEQUENCE => {
             "INVALID_SEQUENCE"
         }
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_BUFFER_TOO_SMALL => {
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_BUFFER_TOO_SMALL => {
             "BUFFER_TOO_SMALL"
         }
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_VIDEO_MODE_ACTIVE => {
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_VIDEO_MODE_ACTIVE => {
             "VIDEO_MODE_ACTIVE"
         }
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_EXPOSURE_IN_PROGRESS => {
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_EXPOSURE_IN_PROGRESS => {
             "EXPOSURE_IN_PROGRESS"
         }
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_GENERAL_ERROR => "GENERAL_ERROR",
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_INVALID_MODE => "INVALID_MODE",
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_INVALID_DIRECTION => {
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_GENERAL_ERROR => {
+            "GENERAL_ERROR"
+        }
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_INVALID_MODE => {
+            "INVALID_MODE"
+        }
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_INVALID_DIRECTION => {
             "INVALID_DIRECTION"
         }
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_UNKNOW_SENSOR_TYPE => "SENSOR_TYPE",
-        crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_END => "ERROR_END",
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_UNKNOW_SENSOR_TYPE => {
+            "SENSOR_TYPE"
+        }
+        crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_END => "ERROR_END",
         _ => "UNKNOWN_ERROR",
     }
 }
 
 fn svb_control_type_to_string(control_type: u32) -> &'static str {
     match control_type {
-        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN => "GAIN",
-        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE => "EXPOSURE",
-        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL => "BLACK_LEVEL",
-        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_COOLER_ENABLE => "COOLER_ENABLE",
-        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE => {
+        crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_GAIN => "GAIN",
+        crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_EXPOSURE => "EXPOSURE",
+        crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL => "BLACK_LEVEL",
+        crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_COOLER_ENABLE => {
+            "COOLER_ENABLE"
+        }
+        crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE => {
             "TARGET_TEMPERATURE"
         }
-        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_CURRENT_TEMPERATURE => {
+        crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_CURRENT_TEMPERATURE => {
             "CURRENT_TEMPERATURE"
         }
-        crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BAD_PIXEL_CORRECTION_ENABLE => {
+        crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_BAD_PIXEL_CORRECTION_ENABLE => {
             "BAD_PIXEL_CORRECTION_ENABLE"
         }
         _ => "UNKNOWN_CONTROL",
@@ -129,18 +167,19 @@ impl VastCameraDriver for SVBVastCameraDriver {
         })?;
 
         unsafe {
-            let connected_cameras = crate::drivers::bindings::svb::SVBGetNumOfConnectedCameras();
+            let connected_cameras =
+                crate::drivers::bindings::svb::driver::SVBGetNumOfConnectedCameras();
 
             let mut cameras = Vec::new();
             for i in 0..connected_cameras {
-                let mut camera_info = crate::drivers::bindings::svb::SVB_CAMERA_INFO {
+                let mut camera_info = crate::drivers::bindings::svb::driver::SVB_CAMERA_INFO {
                     FriendlyName: [0; 32usize],
                     CameraSN: [0; 32usize],
                     PortType: [0; 32usize],
                     DeviceID: 0,
                     CameraID: 0,
                 };
-                let result = crate::drivers::bindings::svb::SVBGetCameraInfo(
+                let result = crate::drivers::bindings::svb::driver::SVBGetCameraInfo(
                     &mut camera_info,
                     i as ::std::os::raw::c_int,
                 );
@@ -187,7 +226,7 @@ impl VastCameraDriver for SVBVastCameraDriver {
         let _guard = self.sdk_lock.lock().unwrap_or_else(|e| e.into_inner());
 
         unsafe {
-            let version = crate::drivers::bindings::svb::SVBGetSDKVersion();
+            let version = crate::drivers::bindings::svb::driver::SVBGetSDKVersion();
 
             std::ffi::CStr::from_ptr(version)
                 .to_str()
@@ -200,7 +239,7 @@ impl VastCameraDriver for SVBVastCameraDriver {
 pub struct SvbVastCamera {
     _driver: Arc<SVBVastCameraDriver>,
     camera_lock: Arc<Mutex<()>>,
-    camera_controls: HashMap<u32, crate::drivers::bindings::svb::SVB_CONTROL_CAPS>,
+    camera_controls: HashMap<u32, crate::drivers::bindings::svb::driver::SVB_CONTROL_CAPS>,
 
     camera_id: Option<i32>,
     camera_name: String,
@@ -209,7 +248,9 @@ pub struct SvbVastCamera {
     camera_is_trigger_cam: bool,
 }
 
-fn control_range(control: &crate::drivers::bindings::svb::SVB_CONTROL_CAPS) -> Option<(u32, u32)> {
+fn control_range(
+    control: &crate::drivers::bindings::svb::driver::SVB_CONTROL_CAPS,
+) -> Option<(u32, u32)> {
     Some((
         u32::try_from(control.MinValue).ok()?,
         u32::try_from(control.MaxValue).ok()?,
@@ -221,7 +262,7 @@ fn control_step(min: u32, max: u32) -> u32 {
 }
 
 fn control_cap_range(
-    control: &crate::drivers::bindings::svb::SVB_CONTROL_CAPS,
+    control: &crate::drivers::bindings::svb::driver::SVB_CONTROL_CAPS,
 ) -> Option<VastCameraCapRange> {
     let (min, max) = control_range(control)?;
     Some(VastCameraCapRange {
@@ -231,12 +272,12 @@ fn control_cap_range(
     })
 }
 
-fn control_is_writable(control: &crate::drivers::bindings::svb::SVB_CONTROL_CAPS) -> bool {
+fn control_is_writable(control: &crate::drivers::bindings::svb::driver::SVB_CONTROL_CAPS) -> bool {
     control.IsWritable != 0
 }
 
 fn exposure_range_microseconds(
-    control: &crate::drivers::bindings::svb::SVB_CONTROL_CAPS,
+    control: &crate::drivers::bindings::svb::driver::SVB_CONTROL_CAPS,
 ) -> Option<(u64, u64)> {
     Some((
         u64::try_from(control.MinValue).ok()?,
@@ -284,13 +325,13 @@ fn frame_size_bytes(width: u32, height: u32, format: CameraFrameFormat) -> usize
 }
 
 fn preferred_image_type(
-    supported_formats: &[crate::drivers::bindings::svb::SVB_IMG_TYPE],
-) -> Option<crate::drivers::bindings::svb::SVB_IMG_TYPE> {
+    supported_formats: &[crate::drivers::bindings::svb::driver::SVB_IMG_TYPE],
+) -> Option<crate::drivers::bindings::svb::driver::SVB_IMG_TYPE> {
     [
-        crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_RAW16,
-        crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_Y16,
-        crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_RAW8,
-        crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_Y8,
+        crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_RAW16,
+        crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_Y16,
+        crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_RAW8,
+        crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_Y8,
     ]
     .into_iter()
     .find(|preferred| supported_formats.contains(preferred))
@@ -299,16 +340,16 @@ fn preferred_image_type(
 fn svb_guide_direction(direction: VastCameraGuideDirection) -> i32 {
     match direction {
         VastCameraGuideDirection::North => {
-            crate::drivers::bindings::svb::SVB_GUIDE_DIRECTION_SVB_GUIDE_NORTH as i32
+            crate::drivers::bindings::svb::driver::SVB_GUIDE_DIRECTION_SVB_GUIDE_NORTH as i32
         }
         VastCameraGuideDirection::South => {
-            crate::drivers::bindings::svb::SVB_GUIDE_DIRECTION_SVB_GUIDE_SOUTH as i32
+            crate::drivers::bindings::svb::driver::SVB_GUIDE_DIRECTION_SVB_GUIDE_SOUTH as i32
         }
         VastCameraGuideDirection::East => {
-            crate::drivers::bindings::svb::SVB_GUIDE_DIRECTION_SVB_GUIDE_EAST as i32
+            crate::drivers::bindings::svb::driver::SVB_GUIDE_DIRECTION_SVB_GUIDE_EAST as i32
         }
         VastCameraGuideDirection::West => {
-            crate::drivers::bindings::svb::SVB_GUIDE_DIRECTION_SVB_GUIDE_WEST as i32
+            crate::drivers::bindings::svb::driver::SVB_GUIDE_DIRECTION_SVB_GUIDE_WEST as i32
         }
     }
 }
@@ -347,7 +388,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                     error_type: VastErrorType::CameraDriverError,
                     message: "SVB SDK lock poisoned".to_string(),
                 })?;
-                crate::drivers::bindings::svb::SVBOpenCamera(camera_id)
+                crate::drivers::bindings::svb::driver::SVBOpenCamera(camera_id)
             };
             if result != 0 {
                 return Err(VastError {
@@ -362,15 +403,17 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                 error_type: VastErrorType::CameraDriverError,
                 message: "SVB camera lock poisoned".to_string(),
             })?;
-            let mut camera_info = crate::drivers::bindings::svb::SVB_CAMERA_INFO {
+            let mut camera_info = crate::drivers::bindings::svb::driver::SVB_CAMERA_INFO {
                 FriendlyName: [0; 32usize],
                 CameraSN: [0; 32usize],
                 PortType: [0; 32usize],
                 DeviceID: 0,
                 CameraID: 0,
             };
-            let mut result =
-                crate::drivers::bindings::svb::SVBGetCameraInfo(&mut camera_info, camera_id);
+            let mut result = crate::drivers::bindings::svb::driver::SVBGetCameraInfo(
+                &mut camera_info,
+                camera_id,
+            );
             if result == 0 {
                 self.camera_name = std::ffi::CStr::from_ptr(camera_info.FriendlyName.as_ptr())
                     .to_str()
@@ -380,7 +423,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
             log::info!("Initialize default values...");
 
-            result = crate::drivers::bindings::svb::SVBRestoreDefaultParam(camera_id);
+            result = crate::drivers::bindings::svb::driver::SVBRestoreDefaultParam(camera_id);
             if result != 0 {
                 return Err(VastError {
                     error_type: VastErrorType::CameraDriverError,
@@ -390,7 +433,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
             log::info!("Disable driver's autosave...");
 
-            result = crate::drivers::bindings::svb::SVBSetAutoSaveParam(camera_id, 0);
+            result = crate::drivers::bindings::svb::driver::SVBSetAutoSaveParam(camera_id, 0);
             if result != 0 {
                 return Err(VastError {
                     error_type: VastErrorType::CameraDriverError,
@@ -400,9 +443,9 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
             log::info!("Get camera properties...");
             let mut p_camera_property =
-                std::mem::zeroed::<crate::drivers::bindings::svb::SVB_CAMERA_PROPERTY>();
+                std::mem::zeroed::<crate::drivers::bindings::svb::driver::SVB_CAMERA_PROPERTY>();
 
-            result = crate::drivers::bindings::svb::SVBGetCameraProperty(
+            result = crate::drivers::bindings::svb::driver::SVBGetCameraProperty(
                 camera_id,
                 &mut p_camera_property,
             );
@@ -436,8 +479,8 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
             }
 
             let mut p_camera_property_ex =
-                std::mem::zeroed::<crate::drivers::bindings::svb::SVB_CAMERA_PROPERTY_EX>();
-            result = crate::drivers::bindings::svb::SVBGetCameraPropertyEx(
+                std::mem::zeroed::<crate::drivers::bindings::svb::driver::SVB_CAMERA_PROPERTY_EX>();
+            result = crate::drivers::bindings::svb::driver::SVBGetCameraPropertyEx(
                 camera_id,
                 &mut p_camera_property_ex,
             );
@@ -448,7 +491,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
             }
 
             for format in p_camera_property.SupportedVideoFormat.iter() {
-                if *format == crate::drivers::bindings::svb::SVB_IMG_TYPE_SVB_IMG_END {
+                if *format == crate::drivers::bindings::svb::driver::SVB_IMG_TYPE_SVB_IMG_END {
                     break;
                 }
 
@@ -459,8 +502,9 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
             if let Some(image_type) = preferred_image_type(&p_camera_property.SupportedVideoFormat)
             {
-                result =
-                    crate::drivers::bindings::svb::SVBSetOutputImageType(camera_id, image_type);
+                result = crate::drivers::bindings::svb::driver::SVBSetOutputImageType(
+                    camera_id, image_type,
+                );
                 if result != 0 {
                     return Err(VastError {
                         error_type: VastErrorType::CameraDriverError,
@@ -470,7 +514,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
             }
 
             let mut pi_number_of_controls: std::os::raw::c_int = 0;
-            result = crate::drivers::bindings::svb::SVBGetNumOfControls(
+            result = crate::drivers::bindings::svb::driver::SVBGetNumOfControls(
                 camera_id,
                 &mut pi_number_of_controls,
             );
@@ -488,8 +532,8 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
             for i in 0..pi_number_of_controls {
                 let mut p_control_caps =
-                    std::mem::zeroed::<crate::drivers::bindings::svb::SVB_CONTROL_CAPS>();
-                result = crate::drivers::bindings::svb::SVBGetControlCaps(
+                    std::mem::zeroed::<crate::drivers::bindings::svb::driver::SVB_CONTROL_CAPS>();
+                result = crate::drivers::bindings::svb::driver::SVBGetControlCaps(
                     camera_id,
                     i,
                     &mut p_control_caps,
@@ -518,7 +562,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                     .insert(p_control_caps.ControlType, p_control_caps);
 
                 match p_control_caps.ControlType {
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE => {
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_EXPOSURE => {
                         if let Some((min, max)) = exposure_range_microseconds(&p_control_caps) {
                             self.camera_capabilities.exposure = VastCameraCapExposure {
                                 min_microseconds: min,
@@ -527,7 +571,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                             };
                         }
                     }
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN => {
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_GAIN => {
                         if control_is_writable(&p_control_caps) {
                             if let Some((min, max)) = control_range(&p_control_caps) {
                                 self.camera_capabilities.gain = Some(VastCameraCapGain {
@@ -538,7 +582,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                             }
                         }
                     }
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL => {
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL => {
                         if control_is_writable(&p_control_caps) {
                             if let Some((min, max)) = control_range(&p_control_caps) {
                                 self.camera_capabilities.offset = Some(VastCameraCapOffset {
@@ -549,7 +593,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                             }
                         }
                     }
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE => {
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE => {
                         if control_is_writable(&p_control_caps) {
                             self.camera_capabilities.cooler = Some(VastCameraCapCooler {
                                 min: p_control_caps.MinValue as f32,
@@ -558,38 +602,38 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                             });
                         }
                     }
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_R => {
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_WB_R => {
                         if control_is_writable(&p_control_caps) {
                             white_balance_red = control_cap_range(&p_control_caps);
                         }
                     }
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_G => {
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_WB_G => {
                         if control_is_writable(&p_control_caps) {
                             white_balance_green = control_cap_range(&p_control_caps);
                         }
                     }
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_B => {
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_WB_B => {
                         if control_is_writable(&p_control_caps) {
                             white_balance_blue = control_cap_range(&p_control_caps);
                         }
                     }
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_CONTRAST => {
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_CONTRAST => {
                         if control_is_writable(&p_control_caps) {
                             self.camera_capabilities.contrast = control_cap_range(&p_control_caps);
                         }
                     }
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SHARPNESS => {
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_SHARPNESS => {
                         if control_is_writable(&p_control_caps) {
                             self.camera_capabilities.sharpness = control_cap_range(&p_control_caps);
                         }
                     }
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SATURATION => {
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_SATURATION => {
                         if control_is_writable(&p_control_caps) {
                             self.camera_capabilities.saturation =
                                 control_cap_range(&p_control_caps);
                         }
                     }
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_FRAME_SPEED_MODE => {
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_FRAME_SPEED_MODE => {
                         if control_is_writable(&p_control_caps) {
                             self.camera_capabilities.usb_speed = control_cap_range(&p_control_caps);
                         }
@@ -607,11 +651,11 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
             // Set bad pixel correction to disabled
             if self.camera_controls.contains_key(
-                &crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BAD_PIXEL_CORRECTION_ENABLE,
+                &crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_BAD_PIXEL_CORRECTION_ENABLE,
             ) {
-                result = crate::drivers::bindings::svb::SVBSetControlValue(
+                result = crate::drivers::bindings::svb::driver::SVBSetControlValue(
                     camera_id,
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BAD_PIXEL_CORRECTION_ENABLE
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_BAD_PIXEL_CORRECTION_ENABLE
                         as i32,
                     0,
                     0,
@@ -625,18 +669,18 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
             }
 
             // INDI applies this SDK workaround before using writable controls.
-            crate::drivers::bindings::svb::SVBSetControlValue(
+            crate::drivers::bindings::svb::driver::SVBSetControlValue(
                 camera_id,
-                crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE as i32,
+                crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_EXPOSURE as i32,
                 1_000_000,
                 0,
             );
-            crate::drivers::bindings::svb::SVBSetCameraMode(
+            crate::drivers::bindings::svb::driver::SVBSetCameraMode(
                 camera_id,
-                crate::drivers::bindings::svb::SVB_CAMERA_MODE_SVB_MODE_TRIG_SOFT,
+                crate::drivers::bindings::svb::driver::SVB_CAMERA_MODE_SVB_MODE_TRIG_SOFT,
             );
 
-            result = crate::drivers::bindings::svb::SVBSetROIFormat(
+            result = crate::drivers::bindings::svb::driver::SVBSetROIFormat(
                 camera_id,
                 0,
                 0,
@@ -666,18 +710,22 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
     }
 
     fn get_current_offset(&self) -> u32 {
-        self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL)
-            .unwrap_or(0)
+        self.get_control_value(
+            crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL,
+        )
+        .unwrap_or(0)
     }
 
     fn get_current_cooler(&self) -> (bool, u32) {
         let enabled = self
-            .get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_COOLER_ENABLE)
+            .get_control_value(
+                crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_COOLER_ENABLE,
+            )
             .unwrap_or(0)
             != 0;
         let target = self
             .get_control_value(
-                crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE,
+                crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE,
             )
             .unwrap_or(0);
 
@@ -686,7 +734,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
     fn get_current_temperature(&self) -> f32 {
         self.get_control_value(
-            crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_CURRENT_TEMPERATURE,
+            crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_CURRENT_TEMPERATURE,
         )
         .map(|temperature| temperature as f32 / 10.0)
         .unwrap_or(0.0)
@@ -698,7 +746,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
         {
             if let Some(exposure) = settings.exposure_microseconds {
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_EXPOSURE,
                     exposure.try_into().unwrap_or(u32::MAX),
                 )?;
             }
@@ -707,7 +755,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
         if self.camera_capabilities.gain.is_some() && settings.gain != self.camera_settings.gain {
             if let Some(gain) = settings.gain {
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_GAIN,
                     gain,
                 )?;
             }
@@ -718,7 +766,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
         {
             if let Some(offset) = settings.offset {
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_BLACK_LEVEL,
                     offset,
                 )?;
             }
@@ -729,11 +777,11 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
         {
             if let Some((enabled, temperature)) = settings.cooler {
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_COOLER_ENABLE,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_COOLER_ENABLE,
                     u32::from(enabled),
                 )?;
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_TARGET_TEMPERATURE,
                     temperature,
                 )?;
             }
@@ -744,15 +792,15 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
         {
             if let Some((red, green, blue)) = settings.white_balance {
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_R,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_WB_R,
                     red,
                 )?;
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_G,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_WB_G,
                     green,
                 )?;
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_B,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_WB_B,
                     blue,
                 )?;
             }
@@ -763,7 +811,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
         {
             if let Some(contrast) = settings.contrast {
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_CONTRAST,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_CONTRAST,
                     contrast,
                 )?;
             }
@@ -774,7 +822,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
         {
             if let Some(sharpness) = settings.sharpness {
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SHARPNESS,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_SHARPNESS,
                     sharpness,
                 )?;
             }
@@ -785,7 +833,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
         {
             if let Some(saturation) = settings.saturation {
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SATURATION,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_SATURATION,
                     saturation,
                 )?;
             }
@@ -796,7 +844,7 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
         {
             if let Some(usb_speed) = settings.usb_speed {
                 self.set_control_value_result(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_FRAME_SPEED_MODE,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_FRAME_SPEED_MODE,
                     usb_speed,
                 )?;
             }
@@ -849,37 +897,49 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
 
         if self.camera_capabilities.white_balance.is_some() {
             settings.white_balance = Some((
-                self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_R)
-                    .unwrap_or(0),
-                self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_G)
-                    .unwrap_or(0),
-                self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_WB_B)
-                    .unwrap_or(0),
+                self.get_control_value(
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_WB_R,
+                )
+                .unwrap_or(0),
+                self.get_control_value(
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_WB_G,
+                )
+                .unwrap_or(0),
+                self.get_control_value(
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_WB_B,
+                )
+                .unwrap_or(0),
             ));
         }
 
         if self.camera_capabilities.contrast.is_some() {
             settings.contrast = self
-                .get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_CONTRAST)
+                .get_control_value(
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_CONTRAST,
+                )
                 .ok();
         }
 
         if self.camera_capabilities.sharpness.is_some() {
             settings.sharpness = self
-                .get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SHARPNESS)
+                .get_control_value(
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_SHARPNESS,
+                )
                 .ok();
         }
 
         if self.camera_capabilities.saturation.is_some() {
             settings.saturation = self
-                .get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_SATURATION)
+                .get_control_value(
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_SATURATION,
+                )
                 .ok();
         }
 
         if self.camera_capabilities.usb_speed.is_some() {
             settings.usb_speed = self
                 .get_control_value(
-                    crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_FRAME_SPEED_MODE,
+                    crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_FRAME_SPEED_MODE,
                 )
                 .ok();
         }
@@ -908,7 +968,8 @@ impl VastCamera<i32, SVBVastCameraDriver> for SvbVastCamera {
                 error_type: VastErrorType::CameraDriverError,
                 message: "SVB SDK lock poisoned".to_string(),
             })?;
-            let result = unsafe { crate::drivers::bindings::svb::SVBCloseCamera(camera_id) };
+            let result =
+                unsafe { crate::drivers::bindings::svb::driver::SVBCloseCamera(camera_id) };
             svb_result(result, "SVBCloseCamera failed")?;
         }
 
@@ -922,24 +983,27 @@ impl VastCameraAcquireImage for SvbVastCamera {
 
         let _guard = self.sdk_guard()?;
         let result = unsafe {
-            crate::drivers::bindings::svb::SVBSetCameraMode(
+            crate::drivers::bindings::svb::driver::SVBSetCameraMode(
                 camera_id,
-                crate::drivers::bindings::svb::SVB_CAMERA_MODE_SVB_MODE_TRIG_SOFT,
+                crate::drivers::bindings::svb::driver::SVB_CAMERA_MODE_SVB_MODE_TRIG_SOFT,
             )
         };
         svb_result(result, "SVBSetCameraMode failed")?;
 
-        let result = unsafe { crate::drivers::bindings::svb::SVBStartVideoCapture(camera_id) };
+        let result =
+            unsafe { crate::drivers::bindings::svb::driver::SVBStartVideoCapture(camera_id) };
         svb_result(result, "SVBStartVideoCapture failed")?;
 
-        let result = unsafe { crate::drivers::bindings::svb::SVBSendSoftTrigger(camera_id) };
+        let result =
+            unsafe { crate::drivers::bindings::svb::driver::SVBSendSoftTrigger(camera_id) };
         svb_result(result, "SVBSendSoftTrigger failed")
     }
 
     fn abort_image_acquisition(&mut self) -> Result<(), VastError> {
         let camera_id = self.open_camera_id()?;
         let _guard = self.sdk_guard()?;
-        let result = unsafe { crate::drivers::bindings::svb::SVBStopVideoCapture(camera_id) };
+        let result =
+            unsafe { crate::drivers::bindings::svb::driver::SVBStopVideoCapture(camera_id) };
         svb_result(result, "SVBStopVideoCapture failed")
     }
 
@@ -988,7 +1052,7 @@ impl VastCameraGuide for SvbVastCamera {
         let camera_id = self.open_camera_id()?;
         let _guard = self.sdk_guard()?;
         let result = unsafe {
-            crate::drivers::bindings::svb::SVBPulseGuide(
+            crate::drivers::bindings::svb::driver::SVBPulseGuide(
                 camera_id,
                 svb_guide_direction(direction),
                 duration_millis as i32,
@@ -1003,14 +1067,15 @@ impl VastCameraStreamingPreview for SvbVastCamera {
         let camera_id = self.open_camera_id()?;
         let _guard = self.sdk_guard()?;
         let result = unsafe {
-            crate::drivers::bindings::svb::SVBSetCameraMode(
+            crate::drivers::bindings::svb::driver::SVBSetCameraMode(
                 camera_id,
-                crate::drivers::bindings::svb::SVB_CAMERA_MODE_SVB_MODE_NORMAL,
+                crate::drivers::bindings::svb::driver::SVB_CAMERA_MODE_SVB_MODE_NORMAL,
             )
         };
         svb_result(result, "SVBSetCameraMode failed")?;
 
-        let result = unsafe { crate::drivers::bindings::svb::SVBStartVideoCapture(camera_id) };
+        let result =
+            unsafe { crate::drivers::bindings::svb::driver::SVBStartVideoCapture(camera_id) };
         svb_result(result, "SVBStartVideoCapture failed")
     }
 
@@ -1024,7 +1089,8 @@ impl VastCameraStreamingPreview for SvbVastCamera {
     fn stop_streaming_preview(&mut self) -> Result<(), VastError> {
         let camera_id = self.open_camera_id()?;
         let _guard = self.sdk_guard()?;
-        let result = unsafe { crate::drivers::bindings::svb::SVBStopVideoCapture(camera_id) };
+        let result =
+            unsafe { crate::drivers::bindings::svb::driver::SVBStopVideoCapture(camera_id) };
         svb_result(result, "SVBStopVideoCapture failed")
     }
 }
@@ -1049,7 +1115,7 @@ impl SvbVastCamera {
         let mut image_type = 0;
         let _guard = self.sdk_guard()?;
         let result = unsafe {
-            crate::drivers::bindings::svb::SVBGetOutputImageType(camera_id, &mut image_type)
+            crate::drivers::bindings::svb::driver::SVBGetOutputImageType(camera_id, &mut image_type)
         };
         svb_result(result, "SVBGetOutputImageType failed")?;
         Ok(image_type.into())
@@ -1077,14 +1143,15 @@ impl SvbVastCamera {
         );
         let _guard = self.sdk_guard()?;
         let result = unsafe {
-            crate::drivers::bindings::svb::SVBGetVideoData(
+            crate::drivers::bindings::svb::driver::SVBGetVideoData(
                 camera_id,
                 data.as_mut_ptr(),
                 data.len() as i64,
                 timeout_millis as i32,
             )
         };
-        if result as u32 == crate::drivers::bindings::svb::SVB_ERROR_CODE_SVB_ERROR_TIMEOUT {
+        if result as u32 == crate::drivers::bindings::svb::driver::SVB_ERROR_CODE_SVB_ERROR_TIMEOUT
+        {
             return Ok(None);
         }
         svb_result(result, "SVBGetVideoData failed")?;
@@ -1098,7 +1165,7 @@ impl SvbVastCamera {
     }
 
     fn current_gain(&self) -> u32 {
-        self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_GAIN)
+        self.get_control_value(crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_GAIN)
             .unwrap_or(0)
     }
 
@@ -1107,7 +1174,7 @@ impl SvbVastCamera {
     }
 
     fn current_exposure(&self) -> u64 {
-        self.get_control_value(crate::drivers::bindings::svb::SVB_CONTROL_TYPE_SVB_EXPOSURE)
+        self.get_control_value(crate::drivers::bindings::svb::driver::SVB_CONTROL_TYPE_SVB_EXPOSURE)
             .map(u64::from)
             .unwrap_or(0)
     }
@@ -1121,7 +1188,7 @@ impl SvbVastCamera {
         let mut auto = 0;
         let _guard = self.sdk_guard()?;
         let result = unsafe {
-            crate::drivers::bindings::svb::SVBGetControlValue(
+            crate::drivers::bindings::svb::driver::SVBGetControlValue(
                 camera_id,
                 control_type as i32,
                 &mut value,
@@ -1163,7 +1230,7 @@ impl SvbVastCamera {
 
         let _guard = self.sdk_guard()?;
         let result = unsafe {
-            crate::drivers::bindings::svb::SVBSetControlValue(
+            crate::drivers::bindings::svb::driver::SVBSetControlValue(
                 camera_id,
                 control_type as i32,
                 value.into(),
@@ -1193,7 +1260,7 @@ impl SvbVastCamera {
 
         let _guard = self.sdk_guard()?;
         let result = unsafe {
-            crate::drivers::bindings::svb::SVBSetROIFormat(
+            crate::drivers::bindings::svb::driver::SVBSetROIFormat(
                 camera_id,
                 x as i32,
                 y as i32,
@@ -1217,7 +1284,7 @@ impl SvbVastCamera {
         let mut bin = 0;
         let _guard = self.sdk_guard()?;
         let result = unsafe {
-            crate::drivers::bindings::svb::SVBGetROIFormat(
+            crate::drivers::bindings::svb::driver::SVBGetROIFormat(
                 camera_id,
                 &mut x,
                 &mut y,
