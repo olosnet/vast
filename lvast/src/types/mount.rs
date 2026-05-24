@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use chrono::{DateTime, Utc};
 
 use crate::{
@@ -5,11 +7,13 @@ use crate::{
     types::common::EquatorialDegrees,
 };
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VastMountType {
     Eq,
     AltAZ,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VastTrackingMode {
     Off,
     Sidereal,
@@ -18,6 +22,7 @@ pub enum VastTrackingMode {
     Custom,
 }
 
+#[derive(Clone, Debug)]
 pub struct VastMountSettings {
     park_mode: bool,
     tracking_mode: VastTrackingMode,
@@ -28,12 +33,113 @@ pub struct VastMountSettings {
     latitude: f64,
 }
 
+impl VastMountSettings {
+    pub fn new(
+        park_mode: bool,
+        tracking_mode: VastTrackingMode,
+        custom_tracking_value: i32,
+        datetime: DateTime<Utc>,
+        timezone_offset: u8,
+        longitude: f64,
+        latitude: f64,
+    ) -> Self {
+        Self {
+            park_mode,
+            tracking_mode,
+            custom_tracking_value,
+            datetime,
+            timezone_offset,
+            longitude,
+            latitude,
+        }
+    }
+
+    pub fn park_mode(&self) -> bool {
+        self.park_mode
+    }
+
+    pub fn tracking_mode(&self) -> VastTrackingMode {
+        self.tracking_mode
+    }
+
+    pub fn custom_tracking_value(&self) -> i32 {
+        self.custom_tracking_value
+    }
+
+    pub fn datetime(&self) -> DateTime<Utc> {
+        self.datetime
+    }
+
+    pub fn timezone_offset(&self) -> u8 {
+        self.timezone_offset
+    }
+
+    pub fn longitude(&self) -> f64 {
+        self.longitude
+    }
+
+    pub fn latitude(&self) -> f64 {
+        self.latitude
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct VastMountCurrStatus {
     is_tracking: bool,
     park_mode: bool,
     coords_j2000: EquatorialDegrees,
     altitude: f64,
     azimuth: f64,
+}
+
+impl VastMountCurrStatus {
+    pub fn new(
+        is_tracking: bool,
+        park_mode: bool,
+        coords_j2000: EquatorialDegrees,
+        altitude: f64,
+        azimuth: f64,
+    ) -> Self {
+        Self {
+            is_tracking,
+            park_mode,
+            coords_j2000,
+            altitude,
+            azimuth,
+        }
+    }
+
+    pub fn is_tracking(&self) -> bool {
+        self.is_tracking
+    }
+
+    pub fn park_mode(&self) -> bool {
+        self.park_mode
+    }
+
+    pub fn coords_j2000(&self) -> EquatorialDegrees {
+        self.coords_j2000
+    }
+
+    pub fn altitude(&self) -> f64 {
+        self.altitude
+    }
+
+    pub fn azimuth(&self) -> f64 {
+        self.azimuth
+    }
+}
+
+impl Display for VastTrackingMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VastTrackingMode::Off => write!(f, "off"),
+            VastTrackingMode::Sidereal => write!(f, "sidereal"),
+            VastTrackingMode::Solar => write!(f, "solar"),
+            VastTrackingMode::Lunar => write!(f, "lunar"),
+            VastTrackingMode::Custom => write!(f, "custom"),
+        }
+    }
 }
 
 pub trait VastMount {
