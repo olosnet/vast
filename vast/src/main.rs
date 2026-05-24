@@ -1,12 +1,12 @@
 use std::{sync::Arc, thread};
 
-use lvast::cameras::{
-    svb::SvbVastCamera,
-    types::{VastCamera, VastCameraAcquireImage, VastCameraDriver as _},
-};
 use lvast::imageformats::{
     fits::FitsImageSaver,
     types::{ImageHeaders, ImageSaver},
+};
+use lvast::{
+    cameras::svb::SvbVastCamera,
+    types::camera::{VastCamera, VastCameraAcquireImage, VastCameraDriver as _},
 };
 
 fn safe_filename_part(value: &str) -> String {

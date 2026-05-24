@@ -5,13 +5,10 @@ use chrono::TimeZone;
 use chrono::Utc;
 
 fn ra_error_arcsec(lhs_hours: f64, rhs_hours: f64, dec_deg: f64) -> f64 {
-    signed_angle_delta_degrees(
-        lhs_hours * consts::HOURS_TO_DEGREES,
-        rhs_hours * consts::HOURS_TO_DEGREES,
-    )
-    .abs()
-        * 3600.0
-        * degrees_to_radians(dec_deg).cos()
+    let delta_degrees =
+        ((lhs_hours - rhs_hours) * consts::HOURS_TO_DEGREES + 540.0).rem_euclid(360.0) - 180.0;
+
+    delta_degrees.abs() * 3600.0 * dec_deg.to_radians().cos()
 }
 
 #[test]

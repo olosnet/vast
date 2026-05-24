@@ -1,7 +1,7 @@
 use crate::{
     base::errors::{VastError, VastErrorType},
-    cameras::types::CameraFrameFormat,
     imageformats::types::{FitsHeaderValue, HeaderCard, ImageSaver},
+    types::camera::CameraFrameFormat,
 };
 
 const FITS_BLOCK_SIZE: usize = 2880;

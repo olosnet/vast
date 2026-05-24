@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::base::errors::{VastError, VastErrorType};
-use crate::cameras::types::{
+use crate::types::camera::{
     CameraBayerPattern, CameraFrameFormat, VastCamera, VastCameraAcquireImage,
     VastCameraCapBinning, VastCameraCapCooler, VastCameraCapExposure, VastCameraCapGain,
     VastCameraCapGuiding, VastCameraCapOffset, VastCameraCapRange, VastCameraCapRoi,
