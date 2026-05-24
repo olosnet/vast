@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
 
-use crate::base::{connections::Connection, errors::VastResult};
+use crate::{
+    base::{connections::Connection, errors::VastResult},
+    types::common::EquatorialDegrees,
+};
 
 pub enum VastMountType {
     Eq,
@@ -28,8 +31,7 @@ pub struct VastMountSettings {
 pub struct VastMountCurrStatus {
     is_tracking: bool,
     park_mode: bool,
-    ra_j2000: String,
-    dec_j2000: String,
+    coords_j2000: EquatorialDegrees,
     altitude: f64,
     azimuth: f64,
 }
@@ -44,7 +46,7 @@ pub trait VastMount {
     fn get_current_settings(&mut self) -> VastResult<VastMountSettings>;
     fn get_current_status(&mut self) -> VastResult<VastMountCurrStatus>;
 
-    fn goto(&mut self, ra_j2000: String, dec_j2000: String) -> VastResult<()>;
+    fn goto(&mut self, coords_j2000: EquatorialDegrees) -> VastResult<()>;
     fn goto_home(&mut self) -> VastResult<()>;
     fn set_settings(&mut self, settings: VastMountSettings) -> VastResult<()>;
 
