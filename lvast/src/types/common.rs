@@ -269,3 +269,9 @@ impl Nutation {
         }
     }
 }
+
+pub enum TemperatureUnit {
+    Celsius,
+    Fahrenheit,
+    Kelvin,
+}
