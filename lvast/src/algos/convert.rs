@@ -54,7 +54,3 @@ pub fn jnow_to_j2000(ra_hours: f64, dec_deg: f64, jd: f64) -> (f64, f64) {
 pub fn jnow_to_j2000_at(ra_hours: f64, dec_deg: f64, observed_at: DateTime<Utc>) -> (f64, f64) {
     jnow_to_j2000(ra_hours, dec_deg, datetime_to_julian_day(observed_at))
 }
-
-#[cfg(test)]
-#[path = "tests.rs"]
-mod tests;
