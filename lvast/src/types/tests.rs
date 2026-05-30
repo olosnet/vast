@@ -1,4 +1,4 @@
-use super::{imageformats::*, platsolver::*};
+use super::{guiding::*, imageformats::*, platsolver::*};
 use crate::types::{
     camera::{CameraFrameFormat, VastCameraFrame},
     imageformats::StandardImageFrameFormat,
@@ -78,4 +78,51 @@ fn creates_requested_backend() {
         create_platesolver(VastPlatesolverBackend::AstrometryNet).implementation_name(),
         "astrometry.net"
     );
+}
+
+#[test]
+fn accepts_default_guide_session_config() {
+    assert!(VastGuideSessionConfig::default().validate().is_ok());
+}
+
+#[test]
+fn rejects_invalid_guide_session_config() {
+    let mut config = VastGuideSessionConfig::default();
+    config.exposure_millis = 0;
+
+    assert!(config.validate().is_err());
+}
+
+#[test]
+fn rejects_invalid_guide_calibration() {
+    let calibration = VastGuideCalibration {
+        camera_angle_deg: 0.0,
+        ra_millis_per_pixel: 0.0,
+        dec_millis_per_pixel: 10.0,
+        ra_inverted: false,
+        dec_inverted: false,
+        image_scale_arcsec_per_pixel: Some(1.5),
+        calibration_position: None,
+    };
+
+    assert!(calibration.validate().is_err());
+}
+
+#[test]
+fn guide_lock_reports_state_from_lost_reason() {
+    let lock = VastGuideStarLock {
+        x: 10.5,
+        y: 12.5,
+        snr: Some(25.0),
+        hfr: Some(2.1),
+        lost_frames: 0,
+        lost_reason: None,
+    };
+    assert!(lock.is_locked());
+
+    let lost = VastGuideStarLock {
+        lost_reason: Some(VastGuideLostStarReason::LowSignal),
+        ..lock
+    };
+    assert!(!lost.is_locked());
 }

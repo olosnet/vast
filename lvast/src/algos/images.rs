@@ -7,8 +7,9 @@
 //!
 //! Algorithms here are inspired by KStars FITS viewer heuristics, especially
 //! histogram binning and simple auto-stretch windows based on robust image
-//! statistics. Multi-channel paths currently assume planar channel layout for
-//! `RGB24` and `RGB32` frames.
+//! statistics. Thresholding helpers also mirror simple ideas from KStars
+//! `fitsthresholddetector.cpp` and PHD2 `src/star.cpp`. Multi-channel paths
+//! currently assume planar channel layout for `RGB24` and `RGB32` frames.
 
 use crate::{
     base::errors::{VastError, VastErrorType, VastResult},
@@ -116,6 +117,39 @@ impl Default for HistogramRenderOptions {
             logarithmic: true,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+/// Threshold estimation method for one or more image channels.
+pub enum ThresholdMethod {
+    /// Use fixed threshold value.
+    Fixed(f64),
+    /// Use `mean + sigma * stddev`.
+    MeanStdDev { sigma: f64 },
+    /// Use `median + sigma * mad * 1.4826` for robust background rejection.
+    MedianMad { sigma: f64 },
+    /// Use `mean * percentage / 100` similar to simple KStars thresholding.
+    MeanPercentage { percentage: f64 },
+    /// Use interpolated percentile of sorted samples.
+    Percentile { percentile: f64 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Output mode when applying thresholds.
+pub enum ThresholdMode {
+    /// Set all surviving pixels to format max value.
+    Binary,
+    /// Keep original sample value for surviving pixels.
+    ToZero,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+/// Per-channel threshold levels for one frame format.
+pub struct ImageThreshold {
+    /// Frame format this threshold was derived for.
+    pub format: StandardImageFrameFormat,
+    /// Per-channel threshold values.
+    pub channels: Vec<f64>,
 }
 
 /// Computes per-channel statistics for raw frame data.
@@ -267,6 +301,129 @@ pub fn compute_percentile_auto_stretch(
     Ok(ImageStretch {
         format: frame.format,
         channels,
+    })
+}
+
+/// Computes per-channel threshold levels using selected method.
+pub fn compute_threshold(frame: &ImageFrame, method: ThresholdMethod) -> VastResult<ImageThreshold> {
+    validate_frame_len(frame)?;
+
+    match method {
+        ThresholdMethod::Fixed(level) if !level.is_finite() => {
+            return Err(file_error("threshold level must be finite".to_string()));
+        }
+        ThresholdMethod::MeanStdDev { sigma } | ThresholdMethod::MedianMad { sigma }
+            if !sigma.is_finite() =>
+        {
+            return Err(file_error("threshold sigma must be finite".to_string()));
+        }
+        ThresholdMethod::MeanPercentage { percentage } if !percentage.is_finite() || percentage <= 0.0 => {
+            return Err(file_error("threshold percentage must be finite and positive".to_string()));
+        }
+        ThresholdMethod::Percentile { percentile } if !(0.0..=1.0).contains(&percentile) => {
+            return Err(file_error("threshold percentile must be within 0..=1".to_string()));
+        }
+        _ => {}
+    }
+
+    let stats = compute_raw_image_stats(frame)?;
+    let samples = planar_channel_samples(frame)?;
+    let max_value = format_max_value(frame.format);
+    let mut channels = Vec::with_capacity(samples.len());
+
+    for (channel_index, channel) in samples.into_iter().enumerate() {
+        let stats = &stats.channel_stats[channel_index];
+        let threshold = match method {
+            ThresholdMethod::Fixed(level) => level,
+            ThresholdMethod::MeanStdDev { sigma } => stats.mean + stats.stddev * sigma,
+            ThresholdMethod::MedianMad { sigma } => stats.median + stats.mad * 1.4826 * sigma,
+            ThresholdMethod::MeanPercentage { percentage } => stats.mean * percentage / 100.0,
+            ThresholdMethod::Percentile { percentile } => {
+                let mut sorted = channel;
+                sorted.sort_by(f64::total_cmp);
+                percentile_of_sorted(&sorted, percentile)
+            }
+        };
+        channels.push(threshold.clamp(0.0, max_value));
+    }
+
+    Ok(ImageThreshold {
+        format: frame.format,
+        channels,
+    })
+}
+
+/// Applies per-channel thresholding and returns thresholded copy.
+pub fn apply_threshold(
+    frame: &ImageFrame,
+    threshold: &ImageThreshold,
+    mode: ThresholdMode,
+) -> VastResult<ImageFrame> {
+    validate_frame_len(frame)?;
+
+    if threshold.format != frame.format {
+        return Err(file_error(format!(
+            "threshold format {} does not match frame format {}",
+            threshold.format.name(),
+            frame.format.name()
+        )));
+    }
+
+    let channels = channel_count(frame.format);
+    if threshold.channels.len() != channels {
+        return Err(file_error(format!(
+            "threshold channel count {} does not match frame channel count {}",
+            threshold.channels.len(),
+            channels
+        )));
+    }
+
+    let max_value = format_max_value(frame.format);
+    let samples = planar_channel_samples(frame)?;
+    let mut data = Vec::with_capacity(frame.data.len());
+
+    for (channel_index, channel) in samples.into_iter().enumerate() {
+        let level = threshold.channels[channel_index];
+
+        match frame.format {
+            StandardImageFrameFormat::RAW8 | StandardImageFrameFormat::RGB24 | StandardImageFrameFormat::RGB32 => {
+                for sample in channel {
+                    let output = if sample >= level {
+                        match mode {
+                            ThresholdMode::Binary => max_value,
+                            ThresholdMode::ToZero => sample,
+                        }
+                    } else {
+                        0.0
+                    };
+                    data.push(output.round().clamp(0.0, max_value) as u8);
+                }
+            }
+            StandardImageFrameFormat::RAW10
+            | StandardImageFrameFormat::RAW12
+            | StandardImageFrameFormat::RAW14
+            | StandardImageFrameFormat::RAW16 => {
+                for sample in channel {
+                    let output = if sample >= level {
+                        match mode {
+                            ThresholdMode::Binary => max_value,
+                            ThresholdMode::ToZero => sample,
+                        }
+                    } else {
+                        0.0
+                    };
+                    let sample_value = output.round().clamp(0.0, max_value) as u16;
+                    data.extend_from_slice(&sample_value.to_ne_bytes());
+                }
+            }
+        }
+    }
+
+    Ok(ImageFrame {
+        width: frame.width,
+        height: frame.height,
+        format: frame.format,
+        data,
     })
 }
 
@@ -592,6 +749,15 @@ fn planar_channel_samples(frame: &ImageFrame) -> VastResult<Vec<Vec<f64>>> {
             })
             .collect()),
     }
+}
+
+/// Returns one decoded channel as floating-point samples.
+pub(super) fn extract_channel_samples(frame: &ImageFrame, channel_index: usize) -> VastResult<Vec<f64>> {
+    let samples = planar_channel_samples(frame)?;
+    samples
+        .get(channel_index)
+        .cloned()
+        .ok_or_else(|| file_error(format!("invalid channel index {channel_index}")))
 }
 
 /// Verifies frame byte length matches dimensions and format.

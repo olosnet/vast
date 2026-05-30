@@ -1,6 +1,6 @@
 use crate::types::{consts, imageformats::{ImageFrame, StandardImageFrameFormat}};
 
-use super::{convert::*, images::*};
+use super::{convert::*, images::*, stars::*};
 use chrono::{TimeZone, Utc};
 
 fn ra_error_arcsec(lhs_hours: f64, rhs_hours: f64, dec_deg: f64) -> f64 {
@@ -215,4 +215,227 @@ fn renders_histogram_visualization() {
     assert_eq!(rendered.format, StandardImageFrameFormat::RGB24);
     assert_eq!(rendered.data.len(), 8 * 8 * 3);
     assert!(rendered.data.iter().any(|value| *value > 0));
+}
+
+#[test]
+fn applies_binary_threshold_to_raw8() {
+    let frame = ImageFrame {
+        width: 4,
+        height: 1,
+        format: StandardImageFrameFormat::RAW8,
+        data: vec![0, 64, 128, 255],
+    };
+    let threshold = compute_threshold(&frame, ThresholdMethod::Fixed(100.0)).unwrap();
+
+    let masked = apply_threshold(&frame, &threshold, ThresholdMode::Binary).unwrap();
+
+    assert_eq!(masked.data, vec![0, 0, 255, 255]);
+}
+
+#[test]
+fn computes_mean_percentage_threshold() {
+    let frame = ImageFrame {
+        width: 4,
+        height: 1,
+        format: StandardImageFrameFormat::RAW8,
+        data: vec![10, 10, 10, 30],
+    };
+
+    let threshold = compute_threshold(&frame, ThresholdMethod::MeanPercentage { percentage: 120.0 }).unwrap();
+
+    assert_eq!(threshold.channels.len(), 1);
+    assert_eq!(threshold.channels[0], 18.0);
+}
+
+#[test]
+fn detects_star_blob_and_centroid() {
+    let frame = ImageFrame {
+        width: 7,
+        height: 7,
+        format: StandardImageFrameFormat::RAW8,
+        data: vec![
+            5, 5, 5, 5, 5, 5, 5,
+            5, 5, 5, 5, 5, 5, 5,
+            5, 5, 20, 40, 20, 5, 5,
+            5, 5, 40, 100, 40, 5, 5,
+            5, 5, 20, 40, 20, 5, 5,
+            5, 5, 5, 5, 5, 5, 5,
+            5, 5, 5, 5, 5, 5, 5,
+        ],
+    };
+
+    let blobs = detect_star_blobs(
+        &frame,
+        StarDetectionOptions {
+            threshold_method: ThresholdMethod::Fixed(15.0),
+            min_pixels: 4,
+            border_margin: 0,
+            ..StarDetectionOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(blobs.len(), 1);
+    assert_eq!(blobs[0].peak_x, 3);
+    assert_eq!(blobs[0].peak_y, 3);
+
+    let centroid = compute_blob_centroid(&frame, &blobs[0]).unwrap();
+    assert!((centroid.x - 3.5).abs() < 0.1);
+    assert!((centroid.y - 3.5).abs() < 0.1);
+
+    let background = estimate_blob_background(&frame, &blobs[0], 2.0, 3.5).unwrap();
+    assert!((background.mean - 5.0).abs() < 0.1);
+
+    let shape = compute_blob_shape_metrics(&frame, &blobs[0], centroid, background).unwrap();
+    assert!(shape.hfr > 0.5);
+    assert!((shape.hfd - shape.hfr * 2.0).abs() < 1e-9);
+}
+
+#[test]
+fn rejects_hot_pixel_blob_with_min_pixels() {
+    let frame = ImageFrame {
+        width: 5,
+        height: 5,
+        format: StandardImageFrameFormat::RAW8,
+        data: vec![
+            0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0,
+            0, 0, 255, 0, 0,
+            0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0,
+        ],
+    };
+
+    let blobs = detect_star_blobs(
+        &frame,
+        StarDetectionOptions {
+            threshold_method: ThresholdMethod::Fixed(100.0),
+            min_pixels: 2,
+            border_margin: 0,
+            ..StarDetectionOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(blobs.is_empty());
+}
+
+#[test]
+fn scores_centered_star_above_edge_star() {
+    let frame = ImageFrame {
+        width: 16,
+        height: 16,
+        format: StandardImageFrameFormat::RAW8,
+        data: vec![0; 16 * 16],
+    };
+    let blobs = vec![
+        StarBlob {
+            channel_index: 0,
+            threshold: 10.0,
+            pixels: vec![(7, 7), (7, 8), (8, 7), (8, 8)],
+            min_x: 7,
+            min_y: 7,
+            max_x: 8,
+            max_y: 8,
+            peak_x: 7,
+            peak_y: 7,
+            peak_value: 200.0,
+        },
+        StarBlob {
+            channel_index: 0,
+            threshold: 10.0,
+            pixels: vec![(0, 0), (0, 1), (1, 0), (1, 1)],
+            min_x: 0,
+            min_y: 0,
+            max_x: 1,
+            max_y: 1,
+            peak_x: 0,
+            peak_y: 0,
+            peak_value: 220.0,
+        },
+    ];
+    let mut data = vec![0_u8; 16 * 16];
+    data[7 * 16 + 7] = 140;
+    data[7 * 16 + 8] = 110;
+    data[8 * 16 + 7] = 110;
+    data[8 * 16 + 8] = 90;
+    data[0] = 150;
+    data[1] = 95;
+    data[16] = 95;
+    data[17] = 80;
+    let frame = ImageFrame { data, ..frame };
+
+    let scores = score_star_blobs(
+        &frame,
+        &blobs,
+        StarScoringOptions {
+            border_guard: 2,
+            ..StarScoringOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(scores[0].index, 0);
+    assert!(scores[0].score > scores[1].score);
+}
+
+#[test]
+fn median_filter_removes_hot_pixel() {
+    let frame = ImageFrame {
+        width: 3,
+        height: 3,
+        format: StandardImageFrameFormat::RAW8,
+        data: vec![
+            0, 0, 0,
+            0, 255, 0,
+            0, 0, 0,
+        ],
+    };
+
+    let filtered = median_filter_channel_3x3(&frame, 0).unwrap();
+
+    assert_eq!(filtered[4], 0.0);
+}
+
+#[test]
+fn finds_star_candidates_and_ignores_hot_pixel() {
+    let frame = ImageFrame {
+        width: 17,
+        height: 17,
+        format: StandardImageFrameFormat::RAW8,
+        data: vec![
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 255, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 10, 20, 30, 20, 10, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 10, 30, 60, 80, 60, 30, 10, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 20, 60, 110, 150, 110, 60, 20, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 30, 80, 150, 220, 150, 80, 30, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 20, 60, 110, 150, 110, 60, 20, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 10, 30, 60, 80, 60, 30, 10, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 10, 20, 30, 20, 10, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+        ],
+    };
+
+    let candidates = find_star_candidates(
+        &frame,
+        StarCandidateOptions {
+            border_margin: 0,
+            max_candidates: 3,
+            ..StarCandidateOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(!candidates.is_empty());
+    assert!((candidates[0].x - 8.5).abs() <= 1.0);
+    assert!((candidates[0].y - 8.5).abs() <= 1.0);
+    assert!(candidates.iter().all(|candidate| candidate.x > 2.0 || candidate.y > 2.0));
 }
