@@ -6,7 +6,7 @@ use crate::types::consts::{
     Z_COEFFICIENTS,
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EquatorialDegrees {
     pub ra: f64,
     pub dec: f64,
