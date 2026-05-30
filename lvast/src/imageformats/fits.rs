@@ -1,3 +1,10 @@
+//! FITS image reader/writer.
+//!
+//! Limitations:
+//! - Reader is tailored to FITS files written by `lvast` and not full general FITS coverage.
+//! - Exact roundtrip for `RAW10`/`RAW12`/`RAW14` relies on custom `LVFMT` header metadata.
+//! - Color images are stored as simple 3D FITS cubes without broader FITS/WCS image semantics.
+
 use crate::{
     base::errors::{VastError, VastErrorType},
     imageformats::types::{

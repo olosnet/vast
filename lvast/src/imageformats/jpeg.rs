@@ -1,3 +1,10 @@
+//! JPEG image reader/writer.
+//!
+//! Limitations:
+//! - JPEG is lossy, so saved pixel values are not preserved exactly on readback.
+//! - Reader exposes only `RAW8` and `RGB24`, matching practical JPEG decode output.
+//! - Higher bit-depth raw inputs are downscaled to 8-bit grayscale on save.
+
 use crate::{
     base::errors::{VastError, VastErrorType},
     imageformats::types::{
