@@ -12,4 +12,6 @@ pub mod drivers;
 pub mod imageformats;
 /// Mount driver traits, shared mount data types and concrete mounts implementations.
 pub mod mounts;
+/// Plate-solving backends and adapters.
+pub mod platesolvers;
 pub mod types;

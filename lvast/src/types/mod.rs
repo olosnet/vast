@@ -5,3 +5,6 @@ pub mod focuser;
 pub mod imageformats;
 pub mod mount;
 pub mod platsolver;
+
+#[cfg(test)]
+mod tests;
