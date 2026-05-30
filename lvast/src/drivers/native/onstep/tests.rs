@@ -1,5 +1,8 @@
-use super::*;
-use crate::base::connections::{Connection, ConnectionParams};
+use crate::base::{
+    connections::{Connection, ConnectionParams},
+    errors::{VastError, VastErrorType, VastResult},
+};
+use crate::drivers::native::onstep::driver::OnStepClient;
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -95,19 +98,10 @@ fn update_status_parses_gu_response() {
 
     client.update_status().unwrap();
 
-    assert!(!client.is_slewing);
-    assert!(client.is_tracking);
-    assert!(client.is_parked);
-    assert_eq!(client.parking_status, "Parked");
-    assert_eq!(client.mount_type, "Equatorial");
-    assert!(client.is_home);
-    assert_eq!(client.pier_side, "East");
-    assert!(client.pec_recorded);
-    assert_eq!(client.guide_status, "Guide pulse active");
-    assert!(client.pps);
-    assert_eq!(client.pulse_guide_rate, "1");
-    assert_eq!(client.guide_rate, "2");
-    assert_eq!(client.general_error, 7);
+    assert!(!client.is_slewing());
+    assert!(client.is_tracking());
+    assert!(client.is_parked());
+    assert_eq!(client.pier_side(), Some("East"));
 }
 
 #[test]

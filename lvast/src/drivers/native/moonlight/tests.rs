@@ -1,5 +1,11 @@
-use super::*;
-use crate::base::connections::{Connection, ConnectionParams};
+use crate::{
+    base::{
+        connections::{Connection, ConnectionParams},
+        errors::{VastError, VastErrorType, VastResult},
+    },
+    drivers::native::moonlight::driver::MoonlightFocuser,
+    types::{common::TemperatureUnit, focuser::VastFocuser},
+};
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
@@ -116,9 +122,13 @@ fn move_to_sends_target_and_start_commands() {
 fn current_temperature_applies_selected_unit() {
     let (mut focuser, state) = build_focuser(&["12", "001E#", "001E#"]);
 
-    focuser.set_temperature_unit(TemperatureUnit::Kelvin).unwrap();
+    focuser
+        .set_temperature_unit(TemperatureUnit::Kelvin)
+        .unwrap();
     let kelvin = focuser.current_temperature().unwrap();
-    focuser.set_temperature_unit(TemperatureUnit::Fahrenheit).unwrap();
+    focuser
+        .set_temperature_unit(TemperatureUnit::Fahrenheit)
+        .unwrap();
     let fahrenheit = focuser.current_temperature().unwrap();
 
     assert!((kelvin - 288.15).abs() < 1e-6);
