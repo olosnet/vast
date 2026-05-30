@@ -151,6 +151,10 @@ pub struct ImageHeaders {
     pub frame_width: Option<u32>,
     /// Subframe height in pixels.
     pub frame_height: Option<u32>,
+    /// Sensor pixel width in micrometers written as `XPIXSZ`.
+    pub pixel_size_x_um: Option<f64>,
+    /// Sensor pixel height in micrometers written as `YPIXSZ`.
+    pub pixel_size_y_um: Option<f64>,
     /// Bayer pattern string written as `BAYERPAT`.
     pub bayer_pattern: Option<String>,
     /// Right ascension in degrees written as `RA`.
@@ -304,18 +308,8 @@ impl ImageHeaders {
         push_optional(&mut headers, "YBINNING", self.bin_y, "Y binning");
         push_optional(&mut headers, "XORGSUBF", self.frame_x, "Subframe X origin");
         push_optional(&mut headers, "YORGSUBF", self.frame_y, "Subframe Y origin");
-        push_optional(
-            &mut headers,
-            "XPIXSZ",
-            self.frame_width,
-            "Subframe width (px)",
-        );
-        push_optional(
-            &mut headers,
-            "YPIXSZ",
-            self.frame_height,
-            "Subframe height (px)",
-        );
+        push_optional(&mut headers, "XPIXSZ", self.pixel_size_x_um, "Pixel width (um)");
+        push_optional(&mut headers, "YPIXSZ", self.pixel_size_y_um, "Pixel height (um)");
         push_optional(
             &mut headers,
             "BAYERPAT",

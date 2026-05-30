@@ -1,181 +1,286 @@
-use std::{sync::Arc, thread};
-
-use lvast::imageformats::fits::FitsImageSaver;
-use lvast::types::imageformats::{ImageHeaders, ImageSaver};
-use lvast::{
-    cameras::svb::SvbVastCamera,
-    types::camera::{VastCamera, VastCameraAcquireImage, VastCameraDriver as _},
+use std::{
+    io::{self, Write},
+    sync::Arc,
 };
 
-fn safe_filename_part(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-        .collect()
+use lvast::{
+    base::errors::VastError,
+    cameras::fake::{
+        FakeCameraDefectProfile, FakeCameraDriver, FakeCameraFocalPreset,
+        FakeCameraSensorPreset, FakeCameraSkyFieldPreset, FakeVastCamera,
+    },
+    imageformats::fits::FitsImageSaver,
+    types::{
+        camera::{VastCamera, VastCameraAcquireImage, VastCameraDriver as _, VastCameraID, VastCameraSettings},
+        imageformats::{ImageHeaders, ImageSaver},
+    },
+};
+
+fn prompt(message: &str) -> io::Result<String> {
+    print!("{message}");
+    io::stdout().flush()?;
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input)?;
+    Ok(input.trim().to_string())
 }
 
-fn save_test_fits(camera: &mut SvbVastCamera) -> Result<(), lvast::base::errors::VastError> {
-    let settings = camera.get_camera_settings()?;
-    let capabilities = camera.get_capabilities();
+fn map_vast<T>(result: Result<T, VastError>) -> Result<T, Box<dyn std::error::Error>> {
+    result.map_err(|err| io::Error::other(err.to_string()).into())
+}
 
-    camera.start_image_acquisition()?;
-    let timeout_millis = settings
-        .exposure_microseconds
-        .map(|exposure| {
-            (exposure / 1_000)
-                .saturating_add(5_000)
-                .min(u64::from(u32::MAX)) as u32
-        })
-        .unwrap_or(30_000);
-    println!("Waiting for test frame ({timeout_millis} ms timeout)...");
-    let frame = camera.get_acquired_image(timeout_millis)?;
-    println!(
-        "Acquired test frame: {}x{} {}, {} bytes",
-        frame.width,
-        frame.height,
-        frame.format,
-        frame.data.len()
-    );
+fn prompt_with_default(message: &str, default: &str) -> io::Result<String> {
+    let input = prompt(&format!("{message} [{default}]: "))?;
+    if input.is_empty() {
+        Ok(default.to_string())
+    } else {
+        Ok(input)
+    }
+}
 
-    let (frame_x, frame_y) = settings
-        .roi
-        .map(|(x, y, _, _)| (Some(x), Some(y)))
-        .unwrap_or((None, None));
-    let (bin_x, bin_y) = settings
-        .binning
-        .map(|(x, y)| (Some(x), Some(y)))
-        .unwrap_or((None, None));
+fn prompt_f64(message: &str, default: f64) -> io::Result<f64> {
+    loop {
+        let input = prompt_with_default(message, &format!("{default}"))?;
+        match input.parse::<f64>() {
+            Ok(value) => return Ok(value),
+            Err(err) => eprintln!("Invalid number '{input}': {err}"),
+        }
+    }
+}
 
-    let headers = ImageHeaders {
-        software: Some("vast camera FITS smoke test".to_string()),
-        image_type: Some("Light".to_string()),
-        instrument: Some(camera.get_name().to_string()),
-        exposure_seconds: settings
-            .exposure_microseconds
-            .map(|exposure| exposure as f64 / 1_000_000.0),
-        gain: settings.gain,
-        offset: settings.offset,
-        ccd_temperature: Some(f64::from(camera.get_current_temperature())),
-        bin_x,
-        bin_y,
-        frame_x,
-        frame_y,
-        frame_width: Some(frame.width),
-        frame_height: Some(frame.height),
-        bayer_pattern: capabilities
-            .bayer_pattern
-            .map(|pattern| pattern.to_string()),
-        ..Default::default()
+fn prompt_u64(message: &str, default: u64) -> io::Result<u64> {
+    loop {
+        let input = prompt_with_default(message, &format!("{default}"))?;
+        match input.parse::<u64>() {
+            Ok(value) => return Ok(value),
+            Err(err) => eprintln!("Invalid integer '{input}': {err}"),
+        }
+    }
+}
+
+fn prompt_u32(message: &str, default: u32) -> io::Result<u32> {
+    loop {
+        let input = prompt_with_default(message, &format!("{default}"))?;
+        match input.parse::<u32>() {
+            Ok(value) => return Ok(value),
+            Err(err) => eprintln!("Invalid integer '{input}': {err}"),
+        }
+    }
+}
+
+fn choose_sensor_preset() -> io::Result<FakeCameraSensorPreset> {
+    let presets = [FakeCameraSensorPreset::Asi294Mc];
+
+    println!("Sensor presets:");
+    for (index, preset) in presets.iter().enumerate() {
+        println!("  {}. {}", index + 1, preset.label());
+    }
+
+    loop {
+        let choice = prompt_with_default("Choose sensor preset", "1")?;
+        match choice.parse::<usize>() {
+            Ok(index) if (1..=presets.len()).contains(&index) => return Ok(presets[index - 1]),
+            _ => eprintln!("Choose value in 1..={}", presets.len()),
+        }
+    }
+}
+
+fn choose_focal_preset(sensor: FakeCameraSensorPreset) -> io::Result<FakeCameraFocalPreset> {
+    let presets = [
+        FakeCameraFocalPreset::Mm135,
+        FakeCameraFocalPreset::Mm250,
+        FakeCameraFocalPreset::Mm400,
+        FakeCameraFocalPreset::Mm600,
+        FakeCameraFocalPreset::Mm800,
+        FakeCameraFocalPreset::Mm1000,
+    ];
+
+    println!("Focal presets:");
+    for (index, preset) in presets.iter().enumerate() {
+        println!("  {}. {}", index + 1, preset.label(sensor));
+    }
+
+    loop {
+        let choice = prompt_with_default("Choose focal preset", "3")?;
+        match choice.parse::<usize>() {
+            Ok(index) if (1..=presets.len()).contains(&index) => return Ok(presets[index - 1]),
+            _ => eprintln!("Choose value in 1..={}", presets.len()),
+        }
+    }
+}
+
+fn choose_field_preset() -> io::Result<FakeCameraSkyFieldPreset> {
+    let presets = [
+        ("M42 Orion", FakeCameraSkyFieldPreset::M42Orion),
+        ("M31 Andromeda", FakeCameraSkyFieldPreset::M31Andromeda),
+        ("M45 Pleiades", FakeCameraSkyFieldPreset::M45Pleiades),
+        ("Vega Lyra", FakeCameraSkyFieldPreset::VegaLyra),
+        ("Polaris", FakeCameraSkyFieldPreset::Polaris),
+        ("Sadr Cygnus", FakeCameraSkyFieldPreset::SadrCygnus),
+        ("No stars (dark frame)", FakeCameraSkyFieldPreset::NoStars),
+        ("Flat field", FakeCameraSkyFieldPreset::FlatField),
+    ];
+
+    println!("Sky field presets:");
+    for (index, (name, preset)) in presets.iter().enumerate() {
+        let center = preset.center();
+        println!(
+            "  {}. {} (RA {:.4} deg, Dec {:.4} deg)",
+            index + 1,
+            name,
+            center.ra,
+            center.dec
+        );
+    }
+
+    loop {
+        let choice = prompt_with_default("Choose sky field", "3")?;
+        match choice.parse::<usize>() {
+            Ok(index) if (1..=presets.len()).contains(&index) => return Ok(presets[index - 1].1),
+            _ => eprintln!("Choose value in 1..={}", presets.len()),
+        }
+    }
+}
+
+fn default_output_path(field: FakeCameraSkyFieldPreset, focal: FakeCameraFocalPreset) -> String {
+    let field_name = match field {
+        FakeCameraSkyFieldPreset::M42Orion => "m42-orion",
+        FakeCameraSkyFieldPreset::M31Andromeda => "m31-andromeda",
+        FakeCameraSkyFieldPreset::M45Pleiades => "m45-pleiades",
+        FakeCameraSkyFieldPreset::VegaLyra => "vega-lyra",
+        FakeCameraSkyFieldPreset::Polaris => "polaris",
+        FakeCameraSkyFieldPreset::SadrCygnus => "sadr-cygnus",
+        FakeCameraSkyFieldPreset::NoStars => "dark",
+        FakeCameraSkyFieldPreset::FlatField => "flat",
     };
+    format!("fake-camera-{field_name}-{}mm.fits", focal.focal_length_mm() as u32)
+}
 
-    let filename = format!("svb-test-{}.fits", safe_filename_part(camera.get_name()));
-    let saver = FitsImageSaver::new(frame.width, frame.height, frame.format.into());
-    saver.save(
-        frame.data,
-        Some(headers.to_fits_headers()),
-        filename.clone(),
-    )?;
-    println!("Saved FITS test frame: {filename}");
+fn choose_defect_profile() -> io::Result<FakeCameraDefectProfile> {
+    let presets = [
+        FakeCameraDefectProfile::Clean,
+        FakeCameraDefectProfile::Light,
+        FakeCameraDefectProfile::Moderate,
+        FakeCameraDefectProfile::Heavy,
+    ];
 
-    Ok(())
+    println!("Sensor defect presets:");
+    for (index, preset) in presets.iter().enumerate() {
+        println!("  {}. {}", index + 1, preset.label());
+    }
+
+    loop {
+        let choice = prompt_with_default("Choose defect profile", "1")?;
+        match choice.parse::<usize>() {
+            Ok(index) if (1..=presets.len()).contains(&index) => return Ok(presets[index - 1]),
+            _ => eprintln!("Choose value in 1..={}", presets.len()),
+        }
+    }
 }
 
 fn main() {
-    let mut camera_driver = lvast::cameras::svb::SVBVastCameraDriver::new();
-
-    println!("SVB SDK Version: {}", camera_driver.get_version());
-
-    let cameras = camera_driver.init().unwrap_or_else(|e| {
-        eprintln!("Failed to initialize camera driver: {}", e);
+    if let Err(err) = run() {
+        eprintln!("Error: {err}");
         std::process::exit(1);
-    });
-
-    println!("Found {} cameras", cameras.len());
-    let camera_driver = Arc::new(camera_driver);
-
-    let mut handles = Vec::new();
-    for camera in cameras {
-        let camera_driver = Arc::clone(&camera_driver);
-        let thread_name = format!("svb-camera-{}", camera.id);
-        let handle = thread::Builder::new()
-            .name(thread_name.clone())
-            //.stack_size(16 * 1024 * 1024)
-            .spawn(move || {
-                println!("Camera: {} ({})", camera.name, camera.id);
-
-                println!("Connecting...");
-
-                let mut connected_camera = SvbVastCamera::new(Arc::clone(&camera_driver));
-                if let Err(e) = connected_camera.connect(camera.id.clone().into()) {
-                    eprintln!("Failed to connect to camera: {}", e);
-                    return;
-                }
-
-                println!("Connected");
-                println!("Reading capabilities...");
-                let capabilities = connected_camera.get_capabilities();
-                println!("{}", capabilities.fancy_info_str());
-
-                println!("Reading settings...");
-                match connected_camera.get_camera_settings() {
-                    Ok(mut settings) => {
-                        println!("{}", settings.fancy_info_str());
-
-                        let mut planned_changes = Vec::new();
-                        if let Some(gain) = &capabilities.gain {
-                            let value = 100;
-                            settings.gain = Some(value);
-                            planned_changes.push(format!(
-                                "gain={} -> {} (range {}..{})",
-                                connected_camera.get_settings().gain.unwrap_or(0),
-                                value,
-                                gain.min,
-                                gain.max
-                            ));
-                        }
-                        if let Some(offset) = &capabilities.offset {
-                            let value = 10;
-                            settings.offset = Some(value);
-                            planned_changes.push(format!(
-                                "offset={} -> {} (range {}..{})",
-                                connected_camera.get_settings().offset.unwrap_or(0),
-                                value,
-                                offset.min,
-                                offset.max
-                            ));
-                        }
-
-                        if settings.gain.is_some() || settings.offset.is_some() {
-                            println!("Setting test gain/offset: {}", planned_changes.join(", "));
-                            if let Err(e) = connected_camera.set_camera_settings(settings) {
-                                eprintln!("Failed to set camera settings: {}", e);
-                            } else if let Ok(settings) = connected_camera.get_camera_settings() {
-                                println!("Settings after test set:\n{}", settings.fancy_info_str());
-                            }
-                        }
-                    }
-                    Err(e) => eprintln!("Failed to retrieve camera settings: {}", e),
-                }
-
-                println!("Capturing FITS test frame...");
-                if let Err(e) = save_test_fits(&mut connected_camera) {
-                    eprintln!("Failed to save FITS test frame: {}", e);
-                }
-
-                connected_camera.disconnect().unwrap_or_else(|e| {
-                    eprintln!("Failed to disconnect from camera: {}", e);
-                });
-            });
-
-        match handle {
-            Ok(handle) => handles.push(handle),
-            Err(e) => eprintln!("Failed to start camera worker {thread_name}: {e}"),
-        }
     }
+}
 
-    for handle in handles {
-        if handle.join().is_err() {
-            eprintln!("Camera worker thread panicked");
-        }
-    }
+fn run() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Fake camera FITS capture tool");
+    println!();
+
+    let sensor = choose_sensor_preset()?;
+    let focal = choose_focal_preset(sensor)?;
+    let field = choose_field_preset()?;
+    let defect_profile = choose_defect_profile()?;
+    let seeing_arcsec = prompt_f64("Seeing arcsec", 2.5)?;
+    let sensor_noise = prompt_f64("Sensor noise sigma", 8.0)?;
+    let exposure_millis = prompt_u64("Exposure milliseconds", 1000)?;
+    let gain = prompt_u32("Gain", 100)?;
+    let offset = prompt_u32("Offset", 512)?;
+    let output_path = prompt_with_default("Output FITS path", &default_output_path(field, focal))?;
+
+    let center = field.center();
+    let fov = focal.approximate_fov_degrees(sensor);
+    println!();
+    println!("Capture plan:");
+    println!("  Sensor: {}", sensor.label());
+    println!("  Focal: {}", focal.label(sensor));
+    println!("  Field center: RA {:.4} deg, Dec {:.4} deg", center.ra, center.dec);
+    println!("  Approx FOV: {:.2} x {:.2} deg", fov.0, fov.1);
+    println!("  Defects: {}", defect_profile.label());
+    println!("  Seeing: {:.2} arcsec", seeing_arcsec);
+    println!("  Noise sigma: {:.2}", sensor_noise);
+    println!("  Exposure: {} ms", exposure_millis);
+    println!("  Output: {}", output_path);
+    println!();
+
+    let mut driver = FakeCameraDriver::new();
+    let cameras = map_vast(driver.init())?;
+    let camera_id = cameras
+        .first()
+        .map(|camera| camera.id.clone())
+        .unwrap_or(VastCameraID::IntID(0));
+    let driver = Arc::new(driver);
+
+    let mut camera = FakeVastCamera::new(Arc::clone(&driver));
+    map_vast(camera.connect(camera_id))?;
+    camera.set_sensor_preset(sensor);
+    camera.set_focal_preset(focal);
+    camera.set_sky_field_preset(field);
+    camera.set_defect_profile(defect_profile);
+    map_vast(camera.set_seeing_arcsec(seeing_arcsec))?;
+    map_vast(camera.set_sensor_noise(sensor_noise))?;
+    map_vast(camera.set_camera_settings(VastCameraSettings {
+        exposure_microseconds: Some(exposure_millis.saturating_mul(1_000)),
+        gain: Some(gain),
+        offset: Some(offset),
+        ..VastCameraSettings::default()
+    }))?;
+
+    map_vast(camera.start_image_acquisition())?;
+    let timeout_millis = exposure_millis.saturating_add(5_000).min(u64::from(u32::MAX)) as u32;
+    let frame = map_vast(camera.get_acquired_image(timeout_millis))?;
+
+    let config = camera.simulation_config();
+    let pixel_scale_arcsec = config.pixel_scale_arcsec_per_pixel(1);
+    let headers = ImageHeaders {
+        software: Some("vast fake camera interactive test".to_string()),
+        image_type: Some(
+            if field.is_dark_mode() {
+                "Dark"
+            } else if field.is_flat_mode() {
+                "Flat"
+            } else {
+                "Light"
+            }
+            .to_string(),
+        ),
+        object: Some(format!("{:?}", field)),
+        instrument: Some(camera.get_name().to_string()),
+        telescope: Some("Fake camera sky preset".to_string()),
+        exposure_seconds: Some(exposure_millis as f64 / 1_000.0),
+        gain: Some(gain),
+        offset: Some(offset),
+        ccd_temperature: Some(f64::from(camera.get_current_temperature())),
+        frame_width: Some(frame.width),
+        frame_height: Some(frame.height),
+        pixel_size_x_um: Some(config.pixel_size_um()),
+        pixel_size_y_um: Some(config.pixel_size_um()),
+        ra_degrees: Some(config.center.ra),
+        dec_degrees: Some(config.center.dec),
+        pixel_scale_arcsec: Some(pixel_scale_arcsec),
+        focal_length_mm: Some(config.focal_length_mm()),
+        ..Default::default()
+    };
+
+    let saver = FitsImageSaver::new(frame.width, frame.height, frame.format.into());
+    map_vast(saver.save(
+        frame.data,
+        Some(headers.to_fits_headers()),
+        output_path.clone(),
+    ))?;
+
+    println!("Saved FITS frame: {output_path}");
+    Ok(())
 }
