@@ -6,5 +6,4 @@ pub mod jpeg;
 pub mod png;
 pub mod tiff;
 /// Shared image metadata and saver traits.
-pub mod types;
 pub mod xisf;

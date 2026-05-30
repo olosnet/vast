@@ -7,7 +7,7 @@
 
 use crate::{
     base::errors::{VastError, VastErrorType},
-    imageformats::types::{
+    types::imageformats::{
         FitsHeaderValue, HeaderCard, ImageFrame, ImageFrameFormat, ImageReader, ImageSaver,
         StandardImageFrameFormat,
     },
@@ -269,7 +269,14 @@ fn parse_header_cards(bytes: &[u8]) -> Result<(HashMap<String, String>, usize), 
 fn parse_card_value(card: &str) -> Option<String> {
     let (_, rest) = card.split_once('=')?;
     let value = rest.split_once('/').map(|(value, _)| value).unwrap_or(rest);
-    Some(value.trim().trim_matches(' ').trim_matches('"').trim_matches('\'').to_string())
+    Some(
+        value
+            .trim()
+            .trim_matches(' ')
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string(),
+    )
 }
 
 fn format_header_value(value: &FitsHeaderValue) -> String {
@@ -289,7 +296,10 @@ fn header_u32(headers: &HashMap<String, String>, key: &str) -> Result<u32, VastE
         .map_err(|err| file_error(format!("invalid FITS header {key}: {err}")))
 }
 
-fn header_optional_u32(headers: &HashMap<String, String>, key: &str) -> Result<Option<u32>, VastError> {
+fn header_optional_u32(
+    headers: &HashMap<String, String>,
+    key: &str,
+) -> Result<Option<u32>, VastError> {
     headers
         .get(key)
         .map(|value| {
@@ -422,7 +432,10 @@ fn image_dimensions_from_axes(
                     "invalid FITS axis layout for RGB24 frame: NAXIS={naxis}, NAXIS1={naxis1}"
                 )));
             }
-            Ok((naxis2, naxis3.ok_or_else(|| file_error("missing FITS header NAXIS3".to_string()))?))
+            Ok((
+                naxis2,
+                naxis3.ok_or_else(|| file_error("missing FITS header NAXIS3".to_string()))?,
+            ))
         }
         StandardImageFrameFormat::RGB32 => {
             if naxis != 3 || naxis1 != 4 {
@@ -430,7 +443,10 @@ fn image_dimensions_from_axes(
                     "invalid FITS axis layout for RGB32 frame: NAXIS={naxis}, NAXIS1={naxis1}"
                 )));
             }
-            Ok((naxis2, naxis3.ok_or_else(|| file_error("missing FITS header NAXIS3".to_string()))?))
+            Ok((
+                naxis2,
+                naxis3.ok_or_else(|| file_error("missing FITS header NAXIS3".to_string()))?,
+            ))
         }
     }
 }
@@ -491,9 +507,7 @@ fn read_fits_data(data: &[u8], format: StandardImageFrameFormat) -> Vec<u8> {
             .collect(),
         StandardImageFrameFormat::RAW8
         | StandardImageFrameFormat::RGB24
-        | StandardImageFrameFormat::RGB32 => {
-            data.to_vec()
-        }
+        | StandardImageFrameFormat::RGB32 => data.to_vec(),
     }
 }
 

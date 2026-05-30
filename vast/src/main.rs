@@ -1,9 +1,7 @@
 use std::{sync::Arc, thread};
 
-use lvast::imageformats::{
-    fits::FitsImageSaver,
-    types::{ImageHeaders, ImageSaver},
-};
+use lvast::imageformats::fits::FitsImageSaver;
+use lvast::types::imageformats::{ImageHeaders, ImageSaver};
 use lvast::{
     cameras::svb::SvbVastCamera,
     types::camera::{VastCamera, VastCameraAcquireImage, VastCameraDriver as _},

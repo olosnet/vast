@@ -6,9 +6,8 @@
 
 use crate::{
     base::errors::{VastError, VastErrorType},
-    imageformats::types::{
-        HeaderCard, ImageFrame, ImageFrameFormat, ImageReader, ImageSaver,
-        StandardImageFrameFormat,
+    types::imageformats::{
+        HeaderCard, ImageFrame, ImageFrameFormat, ImageReader, ImageSaver, StandardImageFrameFormat,
     },
 };
 use image::codecs::tiff::TiffEncoder;
@@ -89,16 +88,26 @@ impl ImageReader for TiffImageSaver {
         let color = image.color();
 
         let (format, data) = match color {
-            ColorType::L8 => (StandardImageFrameFormat::RAW8, image.into_luma8().into_raw()),
+            ColorType::L8 => (
+                StandardImageFrameFormat::RAW8,
+                image.into_luma8().into_raw(),
+            ),
             ColorType::L16 => {
                 let raw = image.into_luma16().into_raw();
-                let data = raw.into_iter().flat_map(|value| value.to_ne_bytes()).collect();
+                let data = raw
+                    .into_iter()
+                    .flat_map(|value| value.to_ne_bytes())
+                    .collect();
                 (StandardImageFrameFormat::RAW16, data)
             }
-            ColorType::Rgb8 => (StandardImageFrameFormat::RGB24, image.into_rgb8().into_raw()),
-            ColorType::Rgba8 => {
-                (StandardImageFrameFormat::RGB32, image.into_rgba8().into_raw())
-            }
+            ColorType::Rgb8 => (
+                StandardImageFrameFormat::RGB24,
+                image.into_rgb8().into_raw(),
+            ),
+            ColorType::Rgba8 => (
+                StandardImageFrameFormat::RGB32,
+                image.into_rgba8().into_raw(),
+            ),
             _ => {
                 let rgba = image.into_rgba8();
                 (StandardImageFrameFormat::RGB32, rgba.into_raw())
@@ -114,10 +123,7 @@ impl ImageReader for TiffImageSaver {
     }
 }
 
-fn encode_data(
-    data: Vec<u8>,
-    format: StandardImageFrameFormat,
-) -> (Vec<u8>, ExtendedColorType) {
+fn encode_data(data: Vec<u8>, format: StandardImageFrameFormat) -> (Vec<u8>, ExtendedColorType) {
     match format {
         StandardImageFrameFormat::RAW8 => (data, ColorType::L8.into()),
         StandardImageFrameFormat::RAW10

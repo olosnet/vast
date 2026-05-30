@@ -7,9 +7,8 @@
 
 use crate::{
     base::errors::{VastError, VastErrorType},
-    imageformats::types::{
-        HeaderCard, ImageFrame, ImageFrameFormat, ImageReader, ImageSaver,
-        StandardImageFrameFormat,
+    types::imageformats::{
+        HeaderCard, ImageFrame, ImageFrameFormat, ImageReader, ImageSaver, StandardImageFrameFormat,
     },
 };
 use image::codecs::jpeg::JpegEncoder;
@@ -80,7 +79,10 @@ impl ImageSaver for JpegImageSaver {
 
 impl ImageReader for JpegImageSaver {
     fn supported_formats(&self) -> &'static [StandardImageFrameFormat] {
-        &[StandardImageFrameFormat::RAW8, StandardImageFrameFormat::RGB24]
+        &[
+            StandardImageFrameFormat::RAW8,
+            StandardImageFrameFormat::RGB24,
+        ]
     }
 
     fn read(&self, path: String) -> Result<ImageFrame, VastError> {
@@ -91,8 +93,14 @@ impl ImageReader for JpegImageSaver {
         let color = image.color();
 
         let (format, data) = match color {
-            ColorType::L8 => (StandardImageFrameFormat::RAW8, image.into_luma8().into_raw()),
-            ColorType::Rgb8 => (StandardImageFrameFormat::RGB24, image.into_rgb8().into_raw()),
+            ColorType::L8 => (
+                StandardImageFrameFormat::RAW8,
+                image.into_luma8().into_raw(),
+            ),
+            ColorType::Rgb8 => (
+                StandardImageFrameFormat::RGB24,
+                image.into_rgb8().into_raw(),
+            ),
             _ => {
                 let rgb = image.into_rgb8();
                 (StandardImageFrameFormat::RGB24, rgb.into_raw())

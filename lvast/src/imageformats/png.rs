@@ -6,9 +6,8 @@
 
 use crate::{
     base::errors::{VastError, VastErrorType},
-    imageformats::types::{
-        HeaderCard, ImageFrame, ImageFrameFormat, ImageReader, ImageSaver,
-        StandardImageFrameFormat,
+    types::imageformats::{
+        HeaderCard, ImageFrame, ImageFrameFormat, ImageReader, ImageSaver, StandardImageFrameFormat,
     },
 };
 use image::codecs::png::PngEncoder;
@@ -88,7 +87,10 @@ impl ImageReader for PngImageSaver {
         let color = image.color();
 
         let (format, data) = match color {
-            ColorType::L8 => (StandardImageFrameFormat::RAW8, image.into_luma8().into_raw()),
+            ColorType::L8 => (
+                StandardImageFrameFormat::RAW8,
+                image.into_luma8().into_raw(),
+            ),
             ColorType::L16 => {
                 let raw = image.into_luma16().into_raw();
                 let data = raw
@@ -97,8 +99,14 @@ impl ImageReader for PngImageSaver {
                     .collect();
                 (StandardImageFrameFormat::RAW16, data)
             }
-            ColorType::Rgb8 => (StandardImageFrameFormat::RGB24, image.into_rgb8().into_raw()),
-            ColorType::Rgba8 => (StandardImageFrameFormat::RGB32, image.into_rgba8().into_raw()),
+            ColorType::Rgb8 => (
+                StandardImageFrameFormat::RGB24,
+                image.into_rgb8().into_raw(),
+            ),
+            ColorType::Rgba8 => (
+                StandardImageFrameFormat::RGB32,
+                image.into_rgba8().into_raw(),
+            ),
             _ => {
                 let rgba = image.into_rgba8();
                 (StandardImageFrameFormat::RGB32, rgba.into_raw())
@@ -120,7 +128,9 @@ fn encode_data(data: Vec<u8>, format: StandardImageFrameFormat) -> (Vec<u8>, Ext
         StandardImageFrameFormat::RAW10
         | StandardImageFrameFormat::RAW12
         | StandardImageFrameFormat::RAW14
-        | StandardImageFrameFormat::RAW16 => (native_u16_to_big_endian(data), ColorType::L16.into()),
+        | StandardImageFrameFormat::RAW16 => {
+            (native_u16_to_big_endian(data), ColorType::L16.into())
+        }
         StandardImageFrameFormat::RGB24 => (data, ColorType::Rgb8.into()),
         StandardImageFrameFormat::RGB32 => (data, ColorType::Rgba8.into()),
     }

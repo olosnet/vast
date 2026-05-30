@@ -7,9 +7,8 @@
 
 use crate::{
     base::errors::{VastError, VastErrorType},
-    imageformats::types::{
-        HeaderCard, ImageFrame, ImageFrameFormat, ImageReader, ImageSaver,
-        StandardImageFrameFormat,
+    types::imageformats::{
+        HeaderCard, ImageFrame, ImageFrameFormat, ImageReader, ImageSaver, StandardImageFrameFormat,
     },
 };
 
@@ -76,9 +75,8 @@ impl ImageSaver for XisfImageSaver {
         header.push_str(
             "<Property id=\"XISF:CreationTime\" type=\"String\" value=\"1970-01-01T00:00:00Z\"/>",
         );
-        header.push_str(
-            "<Property id=\"XISF:CreatorApplication\" type=\"String\" value=\"lvast\"/>",
-        );
+        header
+            .push_str("<Property id=\"XISF:CreatorApplication\" type=\"String\" value=\"lvast\"/>");
         header.push_str("</Metadata>");
         header.push_str(&format!(
             "<Image geometry=\"{image_geometry}\" sampleFormat=\"{sample_format}\"{} location=\"{provisional_location}\">",
@@ -94,11 +92,7 @@ impl ImageSaver for XisfImageSaver {
 
         let initial_header_len = header.len();
         let data_offset = 16 + initial_header_len;
-        let final_location = format!(
-            "attachment:{:020}:{:020}",
-            data_offset,
-            data_block.len()
-        );
+        let final_location = format!("attachment:{:020}:{:020}", data_offset, data_block.len());
         let final_header = header.replacen(&provisional_location, &final_location, 1);
         if final_header.len() != initial_header_len {
             return Err(file_error(
