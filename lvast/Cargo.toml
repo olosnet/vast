@@ -10,6 +10,7 @@ fits-io = "0.1"
 chrono = "0.4"
 serialport = "4.9"
 socket2 = "0.6"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 
 [build-dependencies]
 bindgen = "0.72.1"

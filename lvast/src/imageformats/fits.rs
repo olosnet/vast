@@ -1,8 +1,11 @@
 use crate::{
     base::errors::{VastError, VastErrorType},
-    imageformats::types::{FitsHeaderValue, HeaderCard, ImageSaver},
-    types::camera::CameraFrameFormat,
+    imageformats::types::{
+        FitsHeaderValue, HeaderCard, ImageFrame, ImageFrameFormat, ImageReader, ImageSaver,
+        StandardImageFrameFormat,
+    },
 };
+use std::collections::HashMap;
 
 const FITS_BLOCK_SIZE: usize = 2880;
 const FITS_CARD_SIZE: usize = 80;
@@ -15,12 +18,12 @@ pub struct FitsImageSaver {
     /// Image height in pixels.
     pub height: u32,
     /// Raw camera frame format used to encode FITS pixel data.
-    pub format: CameraFrameFormat,
+    pub format: StandardImageFrameFormat,
 }
 
 impl FitsImageSaver {
     /// Creates a FITS saver for frames with the given dimensions and format.
-    pub fn new(width: u32, height: u32, format: CameraFrameFormat) -> Self {
+    pub fn new(width: u32, height: u32, format: StandardImageFrameFormat) -> Self {
         Self {
             width,
             height,
@@ -30,6 +33,18 @@ impl FitsImageSaver {
 }
 
 impl ImageSaver for FitsImageSaver {
+    fn supported_formats(&self) -> &'static [StandardImageFrameFormat] {
+        &[
+            StandardImageFrameFormat::RAW8,
+            StandardImageFrameFormat::RAW10,
+            StandardImageFrameFormat::RAW12,
+            StandardImageFrameFormat::RAW14,
+            StandardImageFrameFormat::RAW16,
+            StandardImageFrameFormat::RGB24,
+            StandardImageFrameFormat::RGB32,
+        ]
+    }
+
     fn save(
         &self,
         data: Vec<u8>,
@@ -66,12 +81,62 @@ impl ImageSaver for FitsImageSaver {
     }
 }
 
+impl ImageReader for FitsImageSaver {
+    fn supported_formats(&self) -> &'static [StandardImageFrameFormat] {
+        &[
+            StandardImageFrameFormat::RAW8,
+            StandardImageFrameFormat::RAW10,
+            StandardImageFrameFormat::RAW12,
+            StandardImageFrameFormat::RAW14,
+            StandardImageFrameFormat::RAW16,
+            StandardImageFrameFormat::RGB24,
+            StandardImageFrameFormat::RGB32,
+        ]
+    }
+
+    fn read(&self, path: String) -> Result<ImageFrame, VastError> {
+        let bytes = std::fs::read(&path)
+            .map_err(|err| file_error(format!("failed to read FITS file {path}: {err}")))?;
+
+        let (headers, data_offset) = parse_header_cards(&bytes)?;
+        let naxis = header_u32(&headers, "NAXIS")?;
+        let naxis1 = header_u32(&headers, "NAXIS1")?;
+        let naxis2 = header_u32(&headers, "NAXIS2")?;
+        let naxis3 = header_optional_u32(&headers, "NAXIS3")?;
+        let bitpix = header_i64(&headers, "BITPIX")?;
+        let bzero = header_f64(&headers, "BZERO").unwrap_or(0.0);
+        let format = frame_format_from_headers(&headers, naxis, naxis1, naxis3, bitpix, bzero)?;
+        let (width, height) = image_dimensions_from_axes(naxis, naxis1, naxis2, naxis3, format)?;
+        let data_len = expected_data_len(width, height, format)?;
+        let data_end = data_offset
+            .checked_add(data_len)
+            .ok_or_else(|| file_error("FITS data length overflow".to_string()))?;
+
+        if bytes.len() < data_end {
+            return Err(file_error(format!(
+                "invalid FITS payload length: got {}, expected at least {}",
+                bytes.len(),
+                data_end
+            )));
+        }
+
+        Ok(ImageFrame {
+            width,
+            height,
+            format,
+            data: read_fits_data(&bytes[data_offset..data_end], format),
+        })
+    }
+}
+
 fn write_required_headers(
     bytes: &mut Vec<u8>,
     width: u32,
     height: u32,
-    format: CameraFrameFormat,
+    format: StandardImageFrameFormat,
 ) -> Result<(), VastError> {
+    let (naxis, naxis1, naxis2, naxis3) = image_axes(width, height, format);
+
     for header in [
         HeaderCard {
             key: "SIMPLE",
@@ -85,18 +150,18 @@ fn write_required_headers(
         },
         HeaderCard {
             key: "NAXIS",
-            value: 2_u32.into(),
+            value: naxis.into(),
             comment: "number of data axes",
         },
         HeaderCard {
             key: "NAXIS1",
-            value: width.into(),
-            comment: "image width",
+            value: naxis1.into(),
+            comment: "axis 1 length",
         },
         HeaderCard {
             key: "NAXIS2",
-            value: height.into(),
-            comment: "image height",
+            value: naxis2.into(),
+            comment: "axis 2 length",
         },
         HeaderCard {
             key: "BZERO",
@@ -109,6 +174,11 @@ fn write_required_headers(
             comment: "data scale factor",
         },
         HeaderCard {
+            key: "LVFMT",
+            value: format.name().into(),
+            comment: "original lvast frame format",
+        },
+        HeaderCard {
             key: "EXTEND",
             value: true.into(),
             comment: "FITS dataset may contain extensions",
@@ -116,7 +186,35 @@ fn write_required_headers(
     ] {
         write_header_card(bytes, &header)?;
     }
+
+    if let Some(naxis3) = naxis3 {
+        write_header_card(
+            bytes,
+            &HeaderCard {
+                key: "NAXIS3",
+                value: naxis3.into(),
+                comment: "axis 3 length",
+            },
+        )?;
+    }
+
     Ok(())
+}
+
+fn image_axes(
+    width: u32,
+    height: u32,
+    format: StandardImageFrameFormat,
+) -> (u32, u32, u32, Option<u32>) {
+    match format {
+        StandardImageFrameFormat::RAW8
+        | StandardImageFrameFormat::RAW10
+        | StandardImageFrameFormat::RAW12
+        | StandardImageFrameFormat::RAW14
+        | StandardImageFrameFormat::RAW16 => (2, width, height, None),
+        StandardImageFrameFormat::RGB24 => (3, 3, width, Some(height)),
+        StandardImageFrameFormat::RGB32 => (3, 4, width, Some(height)),
+    }
 }
 
 fn write_header_card(bytes: &mut Vec<u8>, header: &HeaderCard) -> Result<(), VastError> {
@@ -137,6 +235,36 @@ fn write_end_card(bytes: &mut Vec<u8>) {
     bytes.extend(format!("{:<FITS_CARD_SIZE$}", "END").as_bytes());
 }
 
+fn parse_header_cards(bytes: &[u8]) -> Result<(HashMap<String, String>, usize), VastError> {
+    let mut headers = HashMap::new();
+    let mut offset = 0;
+
+    while offset + FITS_CARD_SIZE <= bytes.len() {
+        let card = std::str::from_utf8(&bytes[offset..offset + FITS_CARD_SIZE])
+            .map_err(|err| file_error(format!("invalid FITS header encoding: {err}")))?;
+        let key = card[..8].trim();
+
+        offset += FITS_CARD_SIZE;
+
+        if key == "END" {
+            let header_end = offset.div_ceil(FITS_BLOCK_SIZE) * FITS_BLOCK_SIZE;
+            return Ok((headers, header_end));
+        }
+
+        if let Some(value) = parse_card_value(card) {
+            headers.insert(key.to_string(), value);
+        }
+    }
+
+    Err(file_error("missing FITS END header".to_string()))
+}
+
+fn parse_card_value(card: &str) -> Option<String> {
+    let (_, rest) = card.split_once('=')?;
+    let value = rest.split_once('/').map(|(value, _)| value).unwrap_or(rest);
+    Some(value.trim().trim_matches(' ').trim_matches('"').trim_matches('\'').to_string())
+}
+
 fn format_header_value(value: &FitsHeaderValue) -> String {
     match value {
         FitsHeaderValue::String(value) => format!("'{:<8}'", escape_header_string(value)),
@@ -144,6 +272,41 @@ fn format_header_value(value: &FitsHeaderValue) -> String {
         FitsHeaderValue::Float(value) => format!("{value:>20.10}"),
         FitsHeaderValue::Boolean(value) => format!("{:>20}", if *value { "T" } else { "F" }),
     }
+}
+
+fn header_u32(headers: &HashMap<String, String>, key: &str) -> Result<u32, VastError> {
+    headers
+        .get(key)
+        .ok_or_else(|| file_error(format!("missing FITS header {key}")))?
+        .parse::<u32>()
+        .map_err(|err| file_error(format!("invalid FITS header {key}: {err}")))
+}
+
+fn header_optional_u32(headers: &HashMap<String, String>, key: &str) -> Result<Option<u32>, VastError> {
+    headers
+        .get(key)
+        .map(|value| {
+            value
+                .parse::<u32>()
+                .map_err(|err| file_error(format!("invalid FITS header {key}: {err}")))
+        })
+        .transpose()
+}
+
+fn header_i64(headers: &HashMap<String, String>, key: &str) -> Result<i64, VastError> {
+    headers
+        .get(key)
+        .ok_or_else(|| file_error(format!("missing FITS header {key}")))?
+        .parse::<i64>()
+        .map_err(|err| file_error(format!("invalid FITS header {key}: {err}")))
+}
+
+fn header_f64(headers: &HashMap<String, String>, key: &str) -> Result<f64, VastError> {
+    headers
+        .get(key)
+        .ok_or_else(|| file_error(format!("missing FITS header {key}")))?
+        .parse::<f64>()
+        .map_err(|err| file_error(format!("invalid FITS header {key}: {err}")))
 }
 
 fn escape_header_string(value: &str) -> String {
@@ -163,24 +326,25 @@ fn validate_header_key(key: &str) -> Result<(), VastError> {
 fn is_managed_header(key: &str) -> bool {
     matches!(
         key,
-        "SIMPLE" | "BITPIX" | "NAXIS" | "NAXIS1" | "NAXIS2" | "BZERO" | "BSCALE" | "EXTEND"
+        "SIMPLE"
+            | "BITPIX"
+            | "NAXIS"
+            | "NAXIS1"
+            | "NAXIS2"
+            | "NAXIS3"
+            | "BZERO"
+            | "BSCALE"
+            | "LVFMT"
+            | "EXTEND"
     )
 }
 
 fn expected_data_len(
     width: u32,
     height: u32,
-    format: CameraFrameFormat,
+    format: StandardImageFrameFormat,
 ) -> Result<usize, VastError> {
-    let bytes_per_pixel = match format {
-        CameraFrameFormat::RAW8 => 1,
-        CameraFrameFormat::RAW10
-        | CameraFrameFormat::RAW12
-        | CameraFrameFormat::RAW14
-        | CameraFrameFormat::RAW16 => 2,
-        CameraFrameFormat::RGB24 => 3,
-        CameraFrameFormat::RGB32 => 4,
-    };
+    let bytes_per_pixel = format.bytes_per_pixel();
 
     (width as usize)
         .checked_mul(height as usize)
@@ -188,33 +352,111 @@ fn expected_data_len(
         .ok_or_else(|| file_error("FITS image dimensions overflow".to_string()))
 }
 
-fn bitpix(format: CameraFrameFormat) -> i64 {
-    match format {
-        CameraFrameFormat::RAW8 => 8,
-        CameraFrameFormat::RAW10
-        | CameraFrameFormat::RAW12
-        | CameraFrameFormat::RAW14
-        | CameraFrameFormat::RAW16 => 16,
-        CameraFrameFormat::RGB24 | CameraFrameFormat::RGB32 => 8,
+fn frame_format_from_headers(
+    headers: &HashMap<String, String>,
+    naxis: u32,
+    naxis1: u32,
+    naxis3: Option<u32>,
+    bitpix: i64,
+    bzero: f64,
+) -> Result<StandardImageFrameFormat, VastError> {
+    if let Some(value) = headers.get("LVFMT") {
+        return parse_frame_format(value);
+    }
+
+    match (naxis, naxis1, naxis3, bitpix, bzero) {
+        (2, _, None, 8, _) => Ok(StandardImageFrameFormat::RAW8),
+        (2, _, None, 16, 32768.0) => Ok(StandardImageFrameFormat::RAW16),
+        (3, 3, Some(_), 8, _) => Ok(StandardImageFrameFormat::RGB24),
+        (3, 4, Some(_), 8, _) => Ok(StandardImageFrameFormat::RGB32),
+        _ => Err(file_error(format!(
+            "unsupported FITS layout: NAXIS={naxis}, NAXIS1={naxis1}, NAXIS3={:?}, BITPIX={bitpix}, BZERO={bzero}",
+            naxis3
+        ))),
     }
 }
 
-fn bzero(format: CameraFrameFormat) -> f64 {
-    match format {
-        CameraFrameFormat::RAW10
-        | CameraFrameFormat::RAW12
-        | CameraFrameFormat::RAW14
-        | CameraFrameFormat::RAW16 => 32768.0,
-        CameraFrameFormat::RAW8 | CameraFrameFormat::RGB24 | CameraFrameFormat::RGB32 => 0.0,
+fn parse_frame_format(value: &str) -> Result<StandardImageFrameFormat, VastError> {
+    match value.trim() {
+        "RAW8" => Ok(StandardImageFrameFormat::RAW8),
+        "RAW10" => Ok(StandardImageFrameFormat::RAW10),
+        "RAW12" => Ok(StandardImageFrameFormat::RAW12),
+        "RAW14" => Ok(StandardImageFrameFormat::RAW14),
+        "RAW16" => Ok(StandardImageFrameFormat::RAW16),
+        "RGB24" => Ok(StandardImageFrameFormat::RGB24),
+        "RGB32" => Ok(StandardImageFrameFormat::RGB32),
+        _ => Err(file_error(format!("unsupported FITS LVFMT value: {value}"))),
     }
 }
 
-fn fits_data_bytes(data: Vec<u8>, format: CameraFrameFormat) -> Vec<u8> {
+fn image_dimensions_from_axes(
+    naxis: u32,
+    naxis1: u32,
+    naxis2: u32,
+    naxis3: Option<u32>,
+    format: StandardImageFrameFormat,
+) -> Result<(u32, u32), VastError> {
     match format {
-        CameraFrameFormat::RAW10
-        | CameraFrameFormat::RAW12
-        | CameraFrameFormat::RAW14
-        | CameraFrameFormat::RAW16 => data
+        StandardImageFrameFormat::RAW8
+        | StandardImageFrameFormat::RAW10
+        | StandardImageFrameFormat::RAW12
+        | StandardImageFrameFormat::RAW14
+        | StandardImageFrameFormat::RAW16 => {
+            if naxis != 2 {
+                return Err(file_error(format!(
+                    "invalid FITS axis count for monochrome frame: {naxis}"
+                )));
+            }
+            Ok((naxis1, naxis2))
+        }
+        StandardImageFrameFormat::RGB24 => {
+            if naxis != 3 || naxis1 != 3 {
+                return Err(file_error(format!(
+                    "invalid FITS axis layout for RGB24 frame: NAXIS={naxis}, NAXIS1={naxis1}"
+                )));
+            }
+            Ok((naxis2, naxis3.ok_or_else(|| file_error("missing FITS header NAXIS3".to_string()))?))
+        }
+        StandardImageFrameFormat::RGB32 => {
+            if naxis != 3 || naxis1 != 4 {
+                return Err(file_error(format!(
+                    "invalid FITS axis layout for RGB32 frame: NAXIS={naxis}, NAXIS1={naxis1}"
+                )));
+            }
+            Ok((naxis2, naxis3.ok_or_else(|| file_error("missing FITS header NAXIS3".to_string()))?))
+        }
+    }
+}
+
+fn bitpix(format: StandardImageFrameFormat) -> i64 {
+    match format {
+        StandardImageFrameFormat::RAW8 => 8,
+        StandardImageFrameFormat::RAW10
+        | StandardImageFrameFormat::RAW12
+        | StandardImageFrameFormat::RAW14
+        | StandardImageFrameFormat::RAW16 => 16,
+        StandardImageFrameFormat::RGB24 | StandardImageFrameFormat::RGB32 => 8,
+    }
+}
+
+fn bzero(format: StandardImageFrameFormat) -> f64 {
+    match format {
+        StandardImageFrameFormat::RAW10
+        | StandardImageFrameFormat::RAW12
+        | StandardImageFrameFormat::RAW14
+        | StandardImageFrameFormat::RAW16 => 32768.0,
+        StandardImageFrameFormat::RAW8
+        | StandardImageFrameFormat::RGB24
+        | StandardImageFrameFormat::RGB32 => 0.0,
+    }
+}
+
+fn fits_data_bytes(data: Vec<u8>, format: StandardImageFrameFormat) -> Vec<u8> {
+    match format {
+        StandardImageFrameFormat::RAW10
+        | StandardImageFrameFormat::RAW12
+        | StandardImageFrameFormat::RAW14
+        | StandardImageFrameFormat::RAW16 => data
             .chunks_exact(2)
             .flat_map(|chunk| {
                 let value = u16::from_ne_bytes([chunk[0], chunk[1]]) as i32;
@@ -222,7 +464,29 @@ fn fits_data_bytes(data: Vec<u8>, format: CameraFrameFormat) -> Vec<u8> {
                 signed_value.to_be_bytes()
             })
             .collect(),
-        CameraFrameFormat::RAW8 | CameraFrameFormat::RGB24 | CameraFrameFormat::RGB32 => data,
+        StandardImageFrameFormat::RAW8
+        | StandardImageFrameFormat::RGB24
+        | StandardImageFrameFormat::RGB32 => data,
+    }
+}
+
+fn read_fits_data(data: &[u8], format: StandardImageFrameFormat) -> Vec<u8> {
+    match format {
+        StandardImageFrameFormat::RAW10
+        | StandardImageFrameFormat::RAW12
+        | StandardImageFrameFormat::RAW14
+        | StandardImageFrameFormat::RAW16 => data
+            .chunks_exact(2)
+            .flat_map(|chunk| {
+                let value = i16::from_be_bytes([chunk[0], chunk[1]]) as i32;
+                ((value + 32768) as u16).to_ne_bytes()
+            })
+            .collect(),
+        StandardImageFrameFormat::RAW8
+        | StandardImageFrameFormat::RGB24
+        | StandardImageFrameFormat::RGB32 => {
+            data.to_vec()
+        }
     }
 }
 
@@ -235,5 +499,91 @@ fn file_error(message: String) -> VastError {
     VastError {
         error_type: VastErrorType::FileError,
         message,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_file_path() -> String {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!("/tmp/opencode/lvast-fits-test-{unique}.fits")
+    }
+
+    #[test]
+    fn reads_back_raw16_fits() {
+        let path = temp_file_path();
+        let saver = FitsImageSaver::new(2, 1, StandardImageFrameFormat::RAW16);
+
+        saver
+            .save(vec![0x34, 0x12, 0x78, 0x56], None, path.clone())
+            .unwrap();
+
+        let frame = saver.read(path.clone()).unwrap();
+
+        assert_eq!(frame.width, 2);
+        assert_eq!(frame.height, 1);
+        assert_eq!(frame.format, StandardImageFrameFormat::RAW16);
+        assert_eq!(frame.data, vec![0x34, 0x12, 0x78, 0x56]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn reads_back_raw12_fits() {
+        let path = temp_file_path();
+        let saver = FitsImageSaver::new(2, 1, StandardImageFrameFormat::RAW12);
+
+        saver
+            .save(vec![0x34, 0x12, 0x78, 0x06], None, path.clone())
+            .unwrap();
+
+        let frame = saver.read(path.clone()).unwrap();
+
+        assert_eq!(frame.width, 2);
+        assert_eq!(frame.height, 1);
+        assert_eq!(frame.format, StandardImageFrameFormat::RAW12);
+        assert_eq!(frame.data, vec![0x34, 0x12, 0x78, 0x06]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn reads_back_rgb24_fits() {
+        let path = temp_file_path();
+        let saver = FitsImageSaver::new(2, 1, StandardImageFrameFormat::RGB24);
+
+        saver
+            .save(vec![255, 0, 0, 0, 255, 0], None, path.clone())
+            .unwrap();
+
+        let frame = saver.read(path.clone()).unwrap();
+
+        assert_eq!(frame.width, 2);
+        assert_eq!(frame.height, 1);
+        assert_eq!(frame.format, StandardImageFrameFormat::RGB24);
+        assert_eq!(frame.data, vec![255, 0, 0, 0, 255, 0]);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn reads_back_rgb32_fits() {
+        let path = temp_file_path();
+        let saver = FitsImageSaver::new(1, 1, StandardImageFrameFormat::RGB32);
+
+        saver
+            .save(vec![255, 0, 0, 128], None, path.clone())
+            .unwrap();
+
+        let frame = saver.read(path.clone()).unwrap();
+
+        assert_eq!(frame.width, 1);
+        assert_eq!(frame.height, 1);
+        assert_eq!(frame.format, StandardImageFrameFormat::RGB32);
+        assert_eq!(frame.data, vec![255, 0, 0, 128]);
+        std::fs::remove_file(path).unwrap();
     }
 }

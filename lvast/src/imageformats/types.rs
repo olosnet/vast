@@ -1,4 +1,114 @@
-use crate::base::errors::VastError;
+use crate::{
+    base::errors::VastError,
+    types::camera::{CameraFrameFormat, VastCameraFrame},
+};
+use std::fmt::Display;
+
+pub trait ImageFrameFormat: Copy + Clone + std::fmt::Debug + PartialEq + Eq {
+    fn name(&self) -> &'static str;
+    fn bytes_per_pixel(&self) -> usize;
+}
+
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum StandardImageFrameFormat {
+    RAW8,
+    RAW16,
+    RAW14,
+    RAW12,
+    RAW10,
+    RGB24,
+    RGB32,
+}
+
+impl ImageFrameFormat for StandardImageFrameFormat {
+    fn name(&self) -> &'static str {
+        match self {
+            StandardImageFrameFormat::RAW8 => "RAW8",
+            StandardImageFrameFormat::RAW16 => "RAW16",
+            StandardImageFrameFormat::RAW14 => "RAW14",
+            StandardImageFrameFormat::RAW12 => "RAW12",
+            StandardImageFrameFormat::RAW10 => "RAW10",
+            StandardImageFrameFormat::RGB24 => "RGB24",
+            StandardImageFrameFormat::RGB32 => "RGB32",
+        }
+    }
+
+    fn bytes_per_pixel(&self) -> usize {
+        match self {
+            StandardImageFrameFormat::RAW8 => 1,
+            StandardImageFrameFormat::RAW16
+            | StandardImageFrameFormat::RAW14
+            | StandardImageFrameFormat::RAW12
+            | StandardImageFrameFormat::RAW10 => 2,
+            StandardImageFrameFormat::RGB24 => 3,
+            StandardImageFrameFormat::RGB32 => 4,
+        }
+    }
+}
+
+impl Display for StandardImageFrameFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ImageFrame {
+    pub width: u32,
+    pub height: u32,
+    pub format: StandardImageFrameFormat,
+    pub data: Vec<u8>,
+}
+
+impl From<CameraFrameFormat> for StandardImageFrameFormat {
+    fn from(value: CameraFrameFormat) -> Self {
+        match value {
+            CameraFrameFormat::RAW8 => Self::RAW8,
+            CameraFrameFormat::RAW16 => Self::RAW16,
+            CameraFrameFormat::RAW14 => Self::RAW14,
+            CameraFrameFormat::RAW12 => Self::RAW12,
+            CameraFrameFormat::RAW10 => Self::RAW10,
+            CameraFrameFormat::RGB24 => Self::RGB24,
+            CameraFrameFormat::RGB32 => Self::RGB32,
+        }
+    }
+}
+
+impl From<StandardImageFrameFormat> for CameraFrameFormat {
+    fn from(value: StandardImageFrameFormat) -> Self {
+        match value {
+            StandardImageFrameFormat::RAW8 => Self::RAW8,
+            StandardImageFrameFormat::RAW16 => Self::RAW16,
+            StandardImageFrameFormat::RAW14 => Self::RAW14,
+            StandardImageFrameFormat::RAW12 => Self::RAW12,
+            StandardImageFrameFormat::RAW10 => Self::RAW10,
+            StandardImageFrameFormat::RGB24 => Self::RGB24,
+            StandardImageFrameFormat::RGB32 => Self::RGB32,
+        }
+    }
+}
+
+impl From<VastCameraFrame> for ImageFrame {
+    fn from(value: VastCameraFrame) -> Self {
+        Self {
+            width: value.width,
+            height: value.height,
+            format: value.format.into(),
+            data: value.data,
+        }
+    }
+}
+
+impl From<ImageFrame> for VastCameraFrame {
+    fn from(value: ImageFrame) -> Self {
+        Self {
+            width: value.width,
+            height: value.height,
+            format: value.format.into(),
+            data: value.data,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Default, PartialEq)]
 /// Optional metadata used to populate FITS header keywords.
@@ -263,6 +373,8 @@ fn push_optional<T: Into<FitsHeaderValue>>(
 }
 
 pub trait ImageSaver {
+    fn supported_formats(&self) -> &'static [StandardImageFrameFormat];
+
     /// Saves image bytes with optional header cards to `path`.
     fn save(
         &self,
@@ -270,4 +382,48 @@ pub trait ImageSaver {
         image_headers: Option<Vec<HeaderCard>>,
         path: String,
     ) -> Result<(), VastError>;
+}
+
+pub trait ImageReader {
+    fn supported_formats(&self) -> &'static [StandardImageFrameFormat];
+
+    /// Reads image file from `path` and returns decoded frame bytes.
+    fn read(&self, path: String) -> Result<ImageFrame, VastError>;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn camera_and_image_formats_round_trip() {
+        for format in [
+            CameraFrameFormat::RAW8,
+            CameraFrameFormat::RAW16,
+            CameraFrameFormat::RAW14,
+            CameraFrameFormat::RAW12,
+            CameraFrameFormat::RAW10,
+            CameraFrameFormat::RGB24,
+            CameraFrameFormat::RGB32,
+        ] {
+            let image_format: StandardImageFrameFormat = format.into();
+            let camera_format: CameraFrameFormat = image_format.into();
+            assert_eq!(camera_format, format);
+        }
+    }
+
+    #[test]
+    fn camera_and_image_frames_round_trip() {
+        let camera_frame = VastCameraFrame {
+            width: 2,
+            height: 1,
+            format: CameraFrameFormat::RGB24,
+            data: vec![1, 2, 3, 4, 5, 6],
+        };
+
+        let image_frame: ImageFrame = camera_frame.clone().into();
+        let converted_camera_frame: VastCameraFrame = image_frame.into();
+
+        assert_eq!(converted_camera_frame, camera_frame);
+    }
 }
