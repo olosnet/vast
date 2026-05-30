@@ -19,64 +19,9 @@
 
 use crate::base::connections::Connection;
 use crate::base::errors::{VastError, VastErrorType, VastResult};
+use crate::base::workers::{ConnectionWorker, ReceiveOptions};
 use chrono::{DateTime, Utc};
-use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread::JoinHandle;
 use std::time::Duration;
-
-fn sleep(duration: Duration) {
-    #[cfg(not(test))]
-    std::thread::sleep(duration);
-
-    #[cfg(test)]
-    let _ = duration;
-}
-
-fn connection_worker_error(message: impl Into<String>) -> VastError {
-    VastError::new(VastErrorType::ConnectionError, message.into())
-}
-
-enum WorkerRequest {
-    Send {
-        command: String,
-        response: Sender<VastResult<()>>,
-    },
-    SendReceive {
-        command: String,
-        delay: Duration,
-        response: Sender<VastResult<String>>,
-    },
-    Shutdown,
-}
-
-fn worker_loop(mut connection: Box<dyn Connection>, requests: Receiver<WorkerRequest>) {
-    while let Ok(request) = requests.recv() {
-        match request {
-            WorkerRequest::Send { command, response } => {
-                let _ = response.send(connection.send(&command));
-            }
-            WorkerRequest::SendReceive {
-                command,
-                delay,
-                response,
-            } => {
-                let result = connection.send(&command).and_then(|_| {
-                    sleep(delay);
-                    let mut received = connection.receive()?;
-                    if received.ends_with('#') {
-                        received.pop();
-                    }
-                    Ok(received)
-                });
-                let _ = response.send(result);
-            }
-            WorkerRequest::Shutdown => {
-                connection.disconnect();
-                break;
-            }
-        }
-    }
-}
 
 /// Synchronous OnStep command client backed by a boxed [`Connection`].
 ///
@@ -91,8 +36,7 @@ fn worker_loop(mut connection: Box<dyn Connection>, requests: Receiver<WorkerReq
 /// - cached state in [`OnStepClient`] is still mutated on the caller thread, so shared access
 ///   should use `Arc<Mutex<OnStepClient>>`
 pub struct OnStepClient {
-    worker_tx: Sender<WorkerRequest>,
-    worker_handle: Option<JoinHandle<()>>,
+    worker: ConnectionWorker,
     show_commands: bool,
     is_slewing: bool,
     is_tracking: bool,
@@ -117,12 +61,8 @@ impl OnStepClient {
     ///
     /// If `show_commands` is `true`, outgoing OnStep commands are logged with `log::info!`.
     pub fn new(connection: Box<dyn Connection>, show_commands: bool) -> Self {
-        let (worker_tx, worker_rx) = mpsc::channel();
-        let worker_handle = std::thread::spawn(move || worker_loop(connection, worker_rx));
-
         OnStepClient {
-            worker_tx,
-            worker_handle: Some(worker_handle),
+            worker: ConnectionWorker::new("OnStep", connection),
             show_commands,
             is_slewing: false,
             is_tracking: false,
@@ -203,32 +143,17 @@ impl OnStepClient {
     }
 
     fn send_request(&self, command: &str) -> VastResult<()> {
-        let (response_tx, response_rx) = mpsc::channel();
-        self.worker_tx
-            .send(WorkerRequest::Send {
-                command: command.to_string(),
-                response: response_tx,
-            })
-            .map_err(|_| connection_worker_error("OnStep worker thread is not available"))?;
-
-        response_rx
-            .recv()
-            .map_err(|_| connection_worker_error("Failed to receive OnStep send result"))?
+        self.worker.send(command)
     }
 
     fn send_receive_request(&self, command: &str, delay: Duration) -> VastResult<String> {
-        let (response_tx, response_rx) = mpsc::channel();
-        self.worker_tx
-            .send(WorkerRequest::SendReceive {
-                command: command.to_string(),
+        self.worker.send_receive_with_options(
+            command,
+            ReceiveOptions {
                 delay,
-                response: response_tx,
-            })
-            .map_err(|_| connection_worker_error("OnStep worker thread is not available"))?;
-
-        response_rx
-            .recv()
-            .map_err(|_| connection_worker_error("Failed to receive OnStep response"))?
+                trim_suffix: Some('#'),
+            },
+        )
     }
 
     fn send_command_result_with_delay(
@@ -906,15 +831,6 @@ impl OnStepClient {
 
         let command = format!(":SX96,{}#", side);
         self.send_request(&command)
-    }
-}
-
-impl Drop for OnStepClient {
-    fn drop(&mut self) {
-        let _ = self.worker_tx.send(WorkerRequest::Shutdown);
-        if let Some(handle) = self.worker_handle.take() {
-            let _ = handle.join();
-        }
     }
 }
 
