@@ -1,7 +1,14 @@
-//! Raw image histogram and stretch helpers.
+//! Raw image statistics, histogram, and stretch helpers.
 //!
-//! Algorithms here are inspired by KStars FITS viewer heuristics, especially histogram binning
-//! and simple auto-stretch windows based on robust image statistics.
+//! This module operates on [`ImageFrame`] values using the crate's image-local
+//! [`StandardImageFrameFormat`] model. It provides channel statistics,
+//! histogram construction, auto-stretch estimation, midtones transfer, and a
+//! simple RGB histogram visualization for raw frames.
+//!
+//! Algorithms here are inspired by KStars FITS viewer heuristics, especially
+//! histogram binning and simple auto-stretch windows based on robust image
+//! statistics. Multi-channel paths currently assume planar channel layout for
+//! `RGB24` and `RGB32` frames.
 
 use crate::{
     base::errors::{VastError, VastErrorType, VastResult},
@@ -9,64 +16,99 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq)]
+/// Summary statistics for one image channel.
 pub struct ImageChannelStats {
+    /// Smallest sample value in channel.
     pub min: f64,
+    /// Largest sample value in channel.
     pub max: f64,
+    /// Arithmetic mean of all samples.
     pub mean: f64,
+    /// Median sample value.
     pub median: f64,
+    /// Population standard deviation.
     pub stddev: f64,
+    /// Median absolute deviation from median.
     pub mad: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Statistics for full frame split into planar channels.
 pub struct RawImageStats {
+    /// Number of logical channels in frame format.
     pub channels: usize,
+    /// Pixel count for each channel.
     pub pixels_per_channel: usize,
+    /// Per-channel summary statistics.
     pub channel_stats: Vec<ImageChannelStats>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Histogram data for one channel.
 pub struct HistogramChannel {
+    /// Bin start intensity values.
     pub intensities: Vec<f64>,
+    /// Per-bin sample counts.
     pub frequencies: Vec<u32>,
+    /// Running total of frequencies.
     pub cumulative_frequencies: Vec<u32>,
+    /// Intensity range covered by one bin.
     pub bin_width: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Histogram data for full frame.
 pub struct RawHistogram {
+    /// Number of bins used for each channel.
     pub bin_count: usize,
+    /// Per-channel histogram data.
     pub channels: Vec<HistogramChannel>,
+    /// Heuristic ratio used by KStars-style stretch logic.
     pub jm_index: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+/// Low and high clipping points for one channel stretch.
 pub struct StretchWindow {
+    /// Intensity mapped to black.
     pub shadows: f64,
+    /// Intensity mapped to white.
     pub highlights: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
+/// Stretch windows for all frame channels.
 pub struct ImageStretch {
+    /// Frame format this stretch was derived for.
     pub format: StandardImageFrameFormat,
+    /// Per-channel stretch windows.
     pub channels: Vec<StretchWindow>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+/// Midtones transfer parameters for one channel.
 pub struct MidtonesTransfer {
+    /// Intensity treated as black point before curve.
     pub shadows: f64,
+    /// Midtones balance parameter in `(0, 1)`.
     pub midtones: f64,
+    /// Intensity treated as white point before curve.
     pub highlights: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
+/// Output settings for rendered histogram preview.
 pub struct HistogramRenderOptions {
+    /// Output image width in pixels.
     pub width: u32,
+    /// Output image height in pixels.
     pub height: u32,
+    /// Use logarithmic bar scaling when true.
     pub logarithmic: bool,
 }
 
 impl Default for HistogramRenderOptions {
+    /// Returns compact logarithmic histogram preview defaults.
     fn default() -> Self {
         Self {
             width: 256,
@@ -76,6 +118,7 @@ impl Default for HistogramRenderOptions {
     }
 }
 
+/// Computes per-channel statistics for raw frame data.
 pub fn compute_raw_image_stats(frame: &ImageFrame) -> VastResult<RawImageStats> {
     validate_frame_len(frame)?;
 
@@ -98,6 +141,7 @@ pub fn compute_raw_image_stats(frame: &ImageFrame) -> VastResult<RawImageStats> 
     })
 }
 
+/// Builds per-channel histogram data from frame samples.
 pub fn build_raw_histogram(frame: &ImageFrame, requested_bin_count: Option<usize>) -> VastResult<RawHistogram> {
     let stats = compute_raw_image_stats(frame)?;
     let samples = planar_channel_samples(frame)?;
@@ -178,6 +222,7 @@ pub fn build_raw_histogram(frame: &ImageFrame, requested_bin_count: Option<usize
     })
 }
 
+/// Estimates simple KStars-style auto-stretch windows from mean and standard deviation.
 pub fn compute_auto_stretch(frame: &ImageFrame) -> VastResult<ImageStretch> {
     let stats = compute_raw_image_stats(frame)?;
     let mut channels = Vec::with_capacity(stats.channels);
@@ -194,6 +239,7 @@ pub fn compute_auto_stretch(frame: &ImageFrame) -> VastResult<ImageStretch> {
     })
 }
 
+/// Estimates stretch windows from low and high per-channel percentiles.
 pub fn compute_percentile_auto_stretch(
     frame: &ImageFrame,
     low_percentile: f64,
@@ -224,6 +270,7 @@ pub fn compute_percentile_auto_stretch(
     })
 }
 
+/// Applies linear per-channel stretch windows to frame and returns stretched copy.
 pub fn apply_stretch(frame: &ImageFrame, stretch: &ImageStretch) -> VastResult<ImageFrame> {
     validate_frame_len(frame)?;
 
@@ -295,6 +342,7 @@ pub fn apply_stretch(frame: &ImageFrame, stretch: &ImageStretch) -> VastResult<I
     })
 }
 
+/// Applies PixInsight-style midtones transfer curve to each frame channel.
 pub fn apply_midtones_transfer(
     frame: &ImageFrame,
     transfer: &[MidtonesTransfer],
@@ -364,6 +412,7 @@ pub fn apply_midtones_transfer(
     })
 }
 
+/// Renders histogram frequencies into planar `RGB24` preview image.
 pub fn render_histogram_visualization(
     histogram: &RawHistogram,
     options: HistogramRenderOptions,
@@ -428,6 +477,7 @@ pub fn render_histogram_visualization(
     })
 }
 
+/// Computes summary statistics for one channel sample buffer.
 fn compute_channel_stats(channel: Vec<f64>) -> VastResult<ImageChannelStats> {
     if channel.is_empty() {
         return Err(file_error("cannot compute stats for empty channel".to_string()));
@@ -464,6 +514,7 @@ fn compute_channel_stats(channel: Vec<f64>) -> VastResult<ImageChannelStats> {
     })
 }
 
+/// Returns median value from already-sorted samples.
 fn median_of_sorted(sorted: &[f64]) -> f64 {
     let middle = sorted.len() / 2;
     if sorted.len() % 2 == 0 {
@@ -473,6 +524,7 @@ fn median_of_sorted(sorted: &[f64]) -> f64 {
     }
 }
 
+/// Returns interpolated percentile from already-sorted samples.
 fn percentile_of_sorted(sorted: &[f64], percentile: f64) -> f64 {
     if sorted.is_empty() {
         return 0.0;
@@ -489,6 +541,7 @@ fn percentile_of_sorted(sorted: &[f64], percentile: f64) -> f64 {
     }
 }
 
+/// Evaluates midtones transfer function on normalized input.
 fn midtones_curve(value: f64, midtones: f64) -> f64 {
     if value <= 0.0 {
         return 0.0;
@@ -506,6 +559,7 @@ fn midtones_curve(value: f64, midtones: f64) -> f64 {
     }
 }
 
+/// Decodes frame data into planar per-channel floating-point samples.
 fn planar_channel_samples(frame: &ImageFrame) -> VastResult<Vec<Vec<f64>>> {
     let pixels_per_channel = (frame.width as usize)
         .checked_mul(frame.height as usize)
@@ -540,6 +594,7 @@ fn planar_channel_samples(frame: &ImageFrame) -> VastResult<Vec<Vec<f64>>> {
     }
 }
 
+/// Verifies frame byte length matches dimensions and format.
 fn validate_frame_len(frame: &ImageFrame) -> VastResult<()> {
     let expected = (frame.width as usize)
         .checked_mul(frame.height as usize)
@@ -557,6 +612,7 @@ fn validate_frame_len(frame: &ImageFrame) -> VastResult<()> {
     Ok(())
 }
 
+/// Returns logical channel count for image format.
 fn channel_count(format: StandardImageFrameFormat) -> usize {
     match format {
         StandardImageFrameFormat::RAW8
@@ -569,6 +625,7 @@ fn channel_count(format: StandardImageFrameFormat) -> usize {
     }
 }
 
+/// Returns maximum representable sample value for image format.
 fn format_max_value(format: StandardImageFrameFormat) -> f64 {
     match format {
         StandardImageFrameFormat::RAW8 | StandardImageFrameFormat::RGB24 | StandardImageFrameFormat::RGB32 => 255.0,
@@ -579,6 +636,7 @@ fn format_max_value(format: StandardImageFrameFormat) -> f64 {
     }
 }
 
+/// Clamps stretch window into format range and preserves non-zero width.
 fn clamp_stretch_window(
     format: StandardImageFrameFormat,
     mut shadows: f64,
@@ -598,6 +656,7 @@ fn clamp_stretch_window(
     }
 }
 
+/// Builds file-domain error used by image processing helpers.
 fn file_error(message: String) -> VastError {
     VastError::new(VastErrorType::FileError, message)
 }
