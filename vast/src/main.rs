@@ -71,7 +71,7 @@ fn save_test_fits(camera: &mut SvbVastCamera) -> Result<(), lvast::base::errors:
     };
 
     let filename = format!("svb-test-{}.fits", safe_filename_part(camera.get_name()));
-    let saver = FitsImageSaver::new(frame.width, frame.height, frame.format);
+    let saver = FitsImageSaver::new(frame.width, frame.height, frame.format.into());
     saver.save(
         frame.data,
         Some(headers.to_fits_headers()),
