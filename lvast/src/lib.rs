@@ -8,6 +8,8 @@ pub mod base;
 pub mod cameras;
 /// Low-level native SDK bindings or native drivers used by devices.
 pub mod drivers;
+/// Focuser driver traits and concrete focuser implementations.
+pub mod focusers;
 /// Image format metadata and image saver implementations.
 pub mod imageformats;
 /// Mount driver traits, shared mount data types and concrete mounts implementations.

@@ -2,7 +2,6 @@ use crate::base::connections::Connection;
 use crate::base::errors::{VastError, VastErrorType, VastResult};
 use crate::base::workers::{ConnectionWorker, ReceiveOptions};
 use crate::types::common::TemperatureUnit;
-use crate::types::focuser::VastFocuser;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -128,13 +127,9 @@ impl Default for MoonlightFocuser {
     }
 }
 
-impl VastFocuser for MoonlightFocuser {
-    fn new() -> Self {
-        Self::new()
-    }
-
-    fn connect(&mut self, connection: Box<dyn Connection>) -> VastResult<()> {
-        let _ = self.disconnect();
+impl MoonlightFocuser {
+    pub(crate) fn connect_inner(&mut self, connection: Box<dyn Connection>) -> VastResult<()> {
+        let _ = self.disconnect_inner();
 
         let mut worker = ConnectionWorker::new("Moonlight", connection);
 
@@ -171,12 +166,12 @@ impl VastFocuser for MoonlightFocuser {
         Ok(())
     }
 
-    fn current_position(&self) -> VastResult<u32> {
+    pub(crate) fn current_position_inner(&self) -> VastResult<u32> {
         let response = self.send_receive(":GP#", true)?;
         Self::parse_hex_u32(&response, "position")
     }
 
-    fn move_to(&mut self, position: u32) -> VastResult<()> {
+    pub(crate) fn move_to_inner(&mut self, position: u32) -> VastResult<()> {
         if position > 0xFFFF {
             return Err(Self::invalid_input(format!(
                 "Moonlight position {} exceeds controller range 0xFFFF",
@@ -188,22 +183,22 @@ impl VastFocuser for MoonlightFocuser {
         self.send(":FG#")
     }
 
-    fn current_temperature(&self) -> VastResult<f64> {
+    pub(crate) fn current_temperature_inner(&self) -> VastResult<f64> {
         self.send(":C#")?;
         let response = self.send_receive(":GT#", true)?;
         let temperature_celsius = f64::from(Self::parse_hex_i16(&response, "temperature")?) / 2.0;
         Ok(self.convert_temperature_from_celsius(temperature_celsius))
     }
 
-    fn temperature_supported(&self) -> bool {
+    pub(crate) fn temperature_supported_inner(&self) -> bool {
         true
     }
 
-    fn current_temperature_unit(&self) -> TemperatureUnit {
+    pub(crate) fn current_temperature_unit_inner(&self) -> TemperatureUnit {
         Self::unit_from_raw(self.temperature_unit.load(Ordering::Relaxed))
     }
 
-    fn set_temperature_unit(&mut self, unit: TemperatureUnit) -> VastResult<()> {
+    pub(crate) fn set_temperature_unit_inner(&mut self, unit: TemperatureUnit) -> VastResult<()> {
         let raw = match unit {
             TemperatureUnit::Celsius => UNIT_CELSIUS,
             TemperatureUnit::Fahrenheit => UNIT_FAHRENHEIT,
@@ -213,7 +208,7 @@ impl VastFocuser for MoonlightFocuser {
         Ok(())
     }
 
-    fn disconnect(&mut self) -> VastResult<()> {
+    pub(crate) fn disconnect_inner(&mut self) -> VastResult<()> {
         let mut state = self
             .state
             .lock()
@@ -228,7 +223,3 @@ impl VastFocuser for MoonlightFocuser {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "tests.rs"]
-mod tests;

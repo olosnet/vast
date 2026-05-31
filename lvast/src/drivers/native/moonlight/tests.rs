@@ -3,7 +3,7 @@ use crate::{
         connections::{Connection, ConnectionParams},
         errors::{VastError, VastErrorType, VastResult},
     },
-    drivers::native::moonlight::driver::MoonlightFocuser,
+    focusers::moonlight::MoonlightFocuser,
     types::{common::TemperatureUnit, focuser::VastFocuser},
 };
 use std::collections::VecDeque;
