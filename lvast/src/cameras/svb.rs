@@ -11,6 +11,7 @@ use crate::types::camera::{
     VastCameraDriver, VastCameraFrame, VastCameraGuide, VastCameraGuideDirection, VastCameraID,
     VastCameraInfo, VastCameraSettings, VastCameraStreamingPreview,
 };
+use crate::types::imageformats::ImageHeaders;
 
 /// SVBONY/SVB SDK camera driver.
 pub struct SVBVastCameraDriver {
@@ -1040,6 +1041,30 @@ impl VastCameraAcquireImage for SvbVastCamera {
         };
         self.abort_image_acquisition()?;
         Ok(frame)
+    }
+
+    fn get_acquired_image_headers(&mut self) -> Result<ImageHeaders, VastError> {
+        let settings = self.get_camera_settings()?;
+        let capabilities = self.get_capabilities();
+
+        Ok(ImageHeaders {
+            instrument: Some(self.get_name().to_string()),
+            exposure_seconds: settings
+                .exposure_microseconds
+                .map(|exposure| exposure as f64 / 1_000_000.0),
+            gain: settings.gain,
+            offset: settings.offset,
+            ccd_temperature: Some(f64::from(self.get_current_temperature())),
+            target_temperature: settings.cooler.map(|(_, target)| f64::from(target)),
+            bin_x: settings.binning.map(|(x, _)| x),
+            bin_y: settings.binning.map(|(_, y)| y),
+            frame_x: settings.roi.map(|(x, _, _, _)| x),
+            frame_y: settings.roi.map(|(_, y, _, _)| y),
+            frame_width: settings.roi.map(|(_, _, width, _)| width),
+            frame_height: settings.roi.map(|(_, _, _, height)| height),
+            bayer_pattern: capabilities.bayer_pattern.map(|pattern| pattern.to_string()),
+            ..ImageHeaders::default()
+        })
     }
 }
 

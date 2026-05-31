@@ -1,4 +1,4 @@
-use crate::base::errors::VastError;
+use crate::{base::errors::VastError, types::imageformats::ImageHeaders};
 use std::{fmt::Display, sync::Arc};
 
 /// Broad class of camera device.
@@ -490,6 +490,8 @@ pub trait VastCameraAcquireImage: Send + Sync {
     fn abort_image_acquisition(&mut self) -> Result<(), VastError>;
     /// Waits for and returns the acquired image frame.
     fn get_acquired_image(&mut self, timeout_millis: u32) -> Result<VastCameraFrame, VastError>;
+
+    fn get_acquired_image_headers(&mut self) -> Result<ImageHeaders, VastError>;
 }
 
 /// Interface for ST4 pulse guiding.

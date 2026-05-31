@@ -12,7 +12,7 @@ use lvast::{
     imageformats::fits::FitsImageSaver,
     types::{
         camera::{VastCamera, VastCameraAcquireImage, VastCameraDriver as _, VastCameraID, VastCameraSettings},
-        imageformats::{ImageHeaders, ImageSaver},
+        imageformats::ImageSaver,
     },
 };
 
@@ -241,40 +241,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     map_vast(camera.start_image_acquisition())?;
     let timeout_millis = exposure_millis.saturating_add(5_000).min(u64::from(u32::MAX)) as u32;
     let frame = map_vast(camera.get_acquired_image(timeout_millis))?;
-
-    let config = camera.simulation_config();
-    let camera_capabilities = camera.get_capabilities();
-    let pixel_scale_arcsec = config.pixel_scale_arcsec_per_pixel(1);
-    let headers = ImageHeaders {
-        software: Some("vast fake camera interactive test".to_string()),
-        image_type: Some(
-            if field.is_dark_mode() {
-                "Dark"
-            } else if field.is_flat_mode() {
-                "Flat"
-            } else {
-                "Light"
-            }
-            .to_string(),
-        ),
-        object: Some(format!("{:?}", field)),
-        instrument: Some(camera.get_name().to_string()),
-        telescope: Some("Fake camera sky preset".to_string()),
-        exposure_seconds: Some(exposure_millis as f64 / 1_000.0),
-        gain: Some(gain),
-        offset: Some(offset),
-        ccd_temperature: Some(f64::from(camera.get_current_temperature())),
-        frame_width: Some(frame.width),
-        frame_height: Some(frame.height),
-        pixel_size_x_um: Some(config.pixel_size_um()),
-        pixel_size_y_um: Some(config.pixel_size_um()),
-        bayer_pattern: camera_capabilities.bayer_pattern.map(|pattern| pattern.to_string()),
-        ra_degrees: Some(config.center.ra),
-        dec_degrees: Some(config.center.dec),
-        pixel_scale_arcsec: Some(pixel_scale_arcsec),
-        focal_length_mm: Some(config.focal_length_mm()),
-        ..Default::default()
-    };
+    let mut headers = map_vast(camera.get_acquired_image_headers())?;
+    headers.software = Some("vast fake camera interactive test".to_string());
 
     let saver = FitsImageSaver::new(frame.width, frame.height, frame.format.into());
     map_vast(saver.save(

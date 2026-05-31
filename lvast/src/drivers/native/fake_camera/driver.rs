@@ -19,6 +19,7 @@ use crate::{
             VastCameraInfo, VastCameraSettings,
         },
         common::EquatorialDegrees,
+        imageformats::ImageHeaders,
     },
 };
 
@@ -634,6 +635,52 @@ impl FakeVastCamera {
         self.simulation.pixel_scale_arcsec_per_pixel(bin)
     }
 
+    fn acquired_image_headers(&self) -> ImageHeaders {
+        let (width, height, bin) = self.effective_dimensions();
+        let (frame_x, frame_y) = self.sensor_origin();
+        let exposure_seconds = self
+            .camera_settings
+            .exposure_microseconds
+            .map(|exposure| exposure as f64 / 1_000_000.0);
+        let image_type = if self.simulation.sky_field.is_dark_mode() {
+            Some("Dark".to_string())
+        } else if self.simulation.sky_field.is_flat_mode() {
+            Some("Flat".to_string())
+        } else {
+            Some("Light".to_string())
+        };
+
+        ImageHeaders {
+            software: Some("lvast fake camera".to_string()),
+            image_type,
+            object: Some(format!("{:?}", self.simulation.sky_field)),
+            instrument: Some(self.camera_name.clone()),
+            telescope: Some(format!(
+                "Synthetic {} mm field",
+                self.simulation.focal_length_mm().round() as u32
+            )),
+            exposure_seconds,
+            gain: self.camera_settings.gain,
+            offset: self.camera_settings.offset,
+            ccd_temperature: Some(f64::from(self.get_current_temperature())),
+            target_temperature: self.camera_settings.cooler.map(|(_, target)| f64::from(target)),
+            bin_x: Some(bin),
+            bin_y: Some(bin),
+            frame_x: Some(frame_x),
+            frame_y: Some(frame_y),
+            frame_width: Some(width),
+            frame_height: Some(height),
+            pixel_size_x_um: Some(self.simulation.pixel_size_um()),
+            pixel_size_y_um: Some(self.simulation.pixel_size_um()),
+            bayer_pattern: self.simulation.bayer_pattern.map(|pattern| pattern.to_string()),
+            ra_degrees: Some(self.simulation.center.ra),
+            dec_degrees: Some(self.simulation.center.dec),
+            pixel_scale_arcsec: Some(self.effective_pixel_scale_arcsec(bin)),
+            focal_length_mm: Some(self.simulation.focal_length_mm()),
+            ..ImageHeaders::default()
+        }
+    }
+
     fn render_frame(&mut self) -> VastResult<VastCameraFrame> {
         self.simulation.validate()?;
         let (width, height, bin) = self.effective_dimensions();
@@ -1031,6 +1078,11 @@ impl VastCameraAcquireImage for FakeVastCamera {
 
         self.acquisition_started = None;
         self.render_frame()
+    }
+
+    fn get_acquired_image_headers(&mut self) -> Result<ImageHeaders, VastError> {
+        self.ensure_connected()?;
+        Ok(self.acquired_image_headers())
     }
 }
 
