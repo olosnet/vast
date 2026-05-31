@@ -11,11 +11,12 @@ use crate::{
     base::errors::{VastError, VastErrorType, VastResult},
     types::{
         camera::{
-            CameraFrameFormat, VastCamera, VastCameraAcquireImage, VastCameraCapBinning,
-            VastCameraCapExposure, VastCameraCapGain, VastCameraCapGuiding, VastCameraCapOffset,
-            VastCameraCapRoi, VastCameraCapRoiCombination, VastCameraCapabilities,
-            VastCameraDriver, VastCameraFrame, VastCameraGuide, VastCameraGuideDirection,
-            VastCameraID, VastCameraInfo, VastCameraSettings,
+            CameraBayerPattern, CameraFrameFormat, VastCamera, VastCameraAcquireImage,
+            VastCameraCapBinning, VastCameraCapExposure, VastCameraCapGain,
+            VastCameraCapGuiding, VastCameraCapOffset, VastCameraCapRoi,
+            VastCameraCapRoiCombination, VastCameraCapabilities, VastCameraDriver,
+            VastCameraFrame, VastCameraGuide, VastCameraGuideDirection, VastCameraID,
+            VastCameraInfo, VastCameraSettings,
         },
         common::EquatorialDegrees,
     },
@@ -34,6 +35,9 @@ const FLAT_FIELD_LEVEL_ADU: f64 = 24_000.0;
 const OPTICAL_BLUR_SIGMA_PIXELS: f64 = 0.95;
 const SATURATION_LEVEL_ADU: f64 = 55_000.0;
 const MIN_VISIBLE_COMPONENT_ADU: f64 = 0.35;
+const BAYER_RED_RESPONSE: f64 = 0.94;
+const BAYER_GREEN_RESPONSE: f64 = 1.00;
+const BAYER_BLUE_RESPONSE: f64 = 0.88;
 
 thread_local! {
     static GAUSSIAN_AXIS_CACHE: RefCell<HashMap<(u16, u8, i32, i32), Arc<[f64]>>> = RefCell::new(HashMap::new());
@@ -143,6 +147,43 @@ fn gaussian_axis_weights(sigma_pixels: f64, center: f64, start: i32, end: i32) -
 
 fn normalized_pixel_variation(index: u64, salt: u64) -> f64 {
     uniform01(index ^ salt) * 2.0 - 1.0
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BayerChannel {
+    Red,
+    Green,
+    Blue,
+}
+
+fn bayer_channel_at(pattern: &CameraBayerPattern, x: u32, y: u32) -> BayerChannel {
+    match (x & 1, y & 1, pattern) {
+        (0, 0, CameraBayerPattern::RGGB) => BayerChannel::Red,
+        (1, 0, CameraBayerPattern::RGGB) => BayerChannel::Green,
+        (0, 1, CameraBayerPattern::RGGB) => BayerChannel::Green,
+        (1, 1, CameraBayerPattern::RGGB) => BayerChannel::Blue,
+        (0, 0, CameraBayerPattern::BGGR) => BayerChannel::Blue,
+        (1, 0, CameraBayerPattern::BGGR) => BayerChannel::Green,
+        (0, 1, CameraBayerPattern::BGGR) => BayerChannel::Green,
+        (1, 1, CameraBayerPattern::BGGR) => BayerChannel::Red,
+        (0, 0, CameraBayerPattern::GRBG) => BayerChannel::Green,
+        (1, 0, CameraBayerPattern::GRBG) => BayerChannel::Red,
+        (0, 1, CameraBayerPattern::GRBG) => BayerChannel::Blue,
+        (1, 1, CameraBayerPattern::GRBG) => BayerChannel::Green,
+        (0, 0, CameraBayerPattern::GBRG) => BayerChannel::Green,
+        (1, 0, CameraBayerPattern::GBRG) => BayerChannel::Blue,
+        (0, 1, CameraBayerPattern::GBRG) => BayerChannel::Red,
+        (1, 1, CameraBayerPattern::GBRG) => BayerChannel::Green,
+        _ => BayerChannel::Green,
+    }
+}
+
+fn bayer_response(pattern: &CameraBayerPattern, x: u32, y: u32) -> f64 {
+    match bayer_channel_at(pattern, x, y) {
+        BayerChannel::Red => BAYER_RED_RESPONSE,
+        BayerChannel::Green => BAYER_GREEN_RESPONSE,
+        BayerChannel::Blue => BAYER_BLUE_RESPONSE,
+    }
 }
 
 struct DeferredBloom {
@@ -377,6 +418,7 @@ pub struct FakeCameraSimulationConfig {
     pub focal_preset: FakeCameraFocalPreset,
     pub defect_profile: FakeCameraDefectProfile,
     pub sky_field: FakeCameraSkyFieldPreset,
+    pub bayer_pattern: Option<CameraBayerPattern>,
     pub center: EquatorialDegrees,
     pub seeing_arcsec: f64,
     pub sensor_noise: f64,
@@ -390,6 +432,7 @@ impl Default for FakeCameraSimulationConfig {
             focal_preset: FakeCameraFocalPreset::Mm400,
             defect_profile: FakeCameraDefectProfile::Clean,
             sky_field,
+            bayer_pattern: Some(CameraBayerPattern::RGGB),
             center: sky_field.center(),
             seeing_arcsec: 2.5,
             sensor_noise: 8.0,
@@ -483,7 +526,7 @@ impl FakeVastCamera {
             _driver: driver,
             connected: false,
             camera_name: DEFAULT_CAMERA_NAME.to_string(),
-            camera_capabilities: build_capabilities(width, height),
+            camera_capabilities: build_capabilities(width, height, simulation.bayer_pattern.clone()),
             camera_settings: VastCameraSettings {
                 exposure_microseconds: Some(DEFAULT_EXPOSURE_US),
                 offset: Some(DEFAULT_SENSOR_OFFSET),
@@ -502,7 +545,7 @@ impl FakeVastCamera {
     pub fn set_sensor_preset(&mut self, preset: FakeCameraSensorPreset) {
         self.simulation.sensor_preset = preset;
         let (width, height) = preset.resolution();
-        self.camera_capabilities = build_capabilities(width, height);
+        self.camera_capabilities = build_capabilities(width, height, self.simulation.bayer_pattern.clone());
         if let Some((x, y, roi_width, roi_height)) = self.camera_settings.roi {
             if x.saturating_add(roi_width) > width || y.saturating_add(roi_height) > height {
                 self.camera_settings.roi = None;
@@ -521,6 +564,11 @@ impl FakeVastCamera {
 
     pub fn set_defect_profile(&mut self, profile: FakeCameraDefectProfile) {
         self.simulation.defect_profile = profile;
+    }
+
+    pub fn set_bayer_pattern(&mut self, pattern: Option<CameraBayerPattern>) {
+        self.simulation.bayer_pattern = pattern.clone();
+        self.camera_capabilities.bayer_pattern = pattern;
     }
 
     pub fn set_output_ra_dec(&mut self, center: EquatorialDegrees) -> VastResult<()> {
@@ -573,6 +621,13 @@ impl FakeVastCamera {
             let (sensor_width, sensor_height) = self.simulation.resolution();
             (sensor_width / bin, sensor_height / bin, bin)
         }
+    }
+
+    fn sensor_origin(&self) -> (u32, u32) {
+        self.camera_settings
+            .roi
+            .map(|(x, y, _, _)| (x, y))
+            .unwrap_or((0, 0))
     }
 
     fn effective_pixel_scale_arcsec(&self, bin: u32) -> f64 {
@@ -689,9 +744,18 @@ impl FakeVastCamera {
         self.frame_counter = self.frame_counter.wrapping_add(1);
         let noise_seed = self.frame_counter.wrapping_mul(0xA076_1D64_78BD_642F);
         let defect_params = self.simulation.defect_profile.params();
+        let (origin_x, origin_y) = self.sensor_origin();
+        let bayer_pattern = self.simulation.bayer_pattern.clone();
         for (index, pixel) in pixels.iter_mut().enumerate() {
             let sample_seed = noise_seed.wrapping_add(index as u64);
             let mut lambda = pixel.max(0.0);
+            if let Some(pattern) = &bayer_pattern {
+                let x = index as u32 % width;
+                let y = index as u32 / width;
+                let sensor_x = origin_x.saturating_add(x.saturating_mul(bin));
+                let sensor_y = origin_y.saturating_add(y.saturating_mul(bin));
+                lambda *= bayer_response(pattern, sensor_x, sensor_y);
+            }
             if let Some(params) = defect_params {
                 let selector = uniform01(index as u64 ^ 0xD6E8_FD9A_4D94_A4F1);
                 if selector < params.hot_rate {
@@ -1004,7 +1068,11 @@ impl VastCameraGuide for FakeVastCamera {
     }
 }
 
-fn build_capabilities(width: u32, height: u32) -> VastCameraCapabilities {
+fn build_capabilities(
+    width: u32,
+    height: u32,
+    bayer_pattern: Option<CameraBayerPattern>,
+) -> VastCameraCapabilities {
     VastCameraCapabilities {
         gain: Some(VastCameraCapGain {
             min: 0,
@@ -1049,6 +1117,7 @@ fn build_capabilities(width: u32, height: u32) -> VastCameraCapabilities {
             step: 1,
         },
         frame_formats: vec![CameraFrameFormat::RAW16],
+        bayer_pattern,
         max_height: height,
         max_width: width,
         adc_bits: 16,

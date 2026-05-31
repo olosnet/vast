@@ -11,7 +11,7 @@ pub enum CameraType {
     DedicatedMono,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 /// Sensor Bayer color filter arrangement.
 pub enum CameraBayerPattern {
     /// Red/green row followed by green/blue row.

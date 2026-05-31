@@ -243,6 +243,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     let frame = map_vast(camera.get_acquired_image(timeout_millis))?;
 
     let config = camera.simulation_config();
+    let camera_capabilities = camera.get_capabilities();
     let pixel_scale_arcsec = config.pixel_scale_arcsec_per_pixel(1);
     let headers = ImageHeaders {
         software: Some("vast fake camera interactive test".to_string()),
@@ -267,6 +268,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         frame_height: Some(frame.height),
         pixel_size_x_um: Some(config.pixel_size_um()),
         pixel_size_y_um: Some(config.pixel_size_um()),
+        bayer_pattern: camera_capabilities.bayer_pattern.map(|pattern| pattern.to_string()),
         ra_degrees: Some(config.center.ra),
         dec_degrees: Some(config.center.dec),
         pixel_scale_arcsec: Some(pixel_scale_arcsec),

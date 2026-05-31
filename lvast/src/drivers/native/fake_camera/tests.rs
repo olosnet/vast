@@ -6,10 +6,21 @@ use crate::{
         FakeCameraSkyFieldPreset, FakeVastCamera,
     },
     types::{
-        camera::{VastCamera, VastCameraAcquireImage, VastCameraDriver, VastCameraGuide, VastCameraID},
+        camera::{
+            CameraBayerPattern, VastCamera, VastCameraAcquireImage, VastCameraDriver,
+            VastCameraGuide, VastCameraID,
+        },
         common::EquatorialDegrees,
     },
 };
+
+fn raw16_samples(frame: &crate::types::camera::VastCameraFrame) -> Vec<u16> {
+    frame
+        .data
+        .chunks_exact(2)
+        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]))
+        .collect()
+}
 
 #[test]
 fn fake_camera_renders_non_empty_synthetic_frame() {
@@ -29,10 +40,9 @@ fn fake_camera_renders_non_empty_synthetic_frame() {
     assert_eq!(frame.height, 2822);
     assert_eq!(frame.data.len(), 4144 * 2822 * 2);
 
-    let samples = frame
-        .data
-        .chunks_exact(2)
-        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]) as u32)
+    let samples = raw16_samples(&frame)
+        .into_iter()
+        .map(u32::from)
         .collect::<Vec<_>>();
     let min = *samples.iter().min().unwrap();
     let max = *samples.iter().max().unwrap();
@@ -131,10 +141,9 @@ fn fake_camera_no_stars_mode_produces_dark_like_frame() {
 
     camera.start_image_acquisition().unwrap();
     let frame = camera.get_acquired_image(2_000).unwrap();
-    let samples = frame
-        .data
-        .chunks_exact(2)
-        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]) as u32)
+    let samples = raw16_samples(&frame)
+        .into_iter()
+        .map(u32::from)
         .collect::<Vec<_>>();
     let max = *samples.iter().max().unwrap();
     let bright_outliers = samples.iter().filter(|&&value| value > 1_000).count();
@@ -162,10 +171,9 @@ fn fake_camera_defect_profile_adds_hot_pixels() {
 
     camera.start_image_acquisition().unwrap();
     let frame = camera.get_acquired_image(2_000).unwrap();
-    let samples = frame
-        .data
-        .chunks_exact(2)
-        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]) as u32)
+    let samples = raw16_samples(&frame)
+        .into_iter()
+        .map(u32::from)
         .collect::<Vec<_>>();
     let hot_pixels = samples.iter().filter(|&&value| value > 6_000).count();
     let cold_pixels = samples.iter().filter(|&&value| value < 520).count();
@@ -192,10 +200,9 @@ fn fake_camera_flat_field_mode_produces_bright_smooth_frame() {
 
     camera.start_image_acquisition().unwrap();
     let frame = camera.get_acquired_image(2_000).unwrap();
-    let samples = frame
-        .data
-        .chunks_exact(2)
-        .map(|bytes| u16::from_le_bytes([bytes[0], bytes[1]]) as u32)
+    let samples = raw16_samples(&frame)
+        .into_iter()
+        .map(u32::from)
         .collect::<Vec<_>>();
     let min = *samples.iter().min().unwrap();
     let max = *samples.iter().max().unwrap();
@@ -204,4 +211,76 @@ fn fake_camera_flat_field_mode_produces_bright_smooth_frame() {
     assert!(mean > 10_000.0, "flat frame too dim, mean={mean}");
     assert!(max < 20_000, "flat frame has unexpected stellar-like spikes, max={max}");
     assert!(max > min + 1_000, "flat frame too uniform, min={min} max={max}");
+}
+
+#[test]
+fn fake_camera_color_bayer_pattern_biases_green_sites_higher() {
+    let driver = Arc::new(FakeCameraDriver::new());
+    let mut camera = FakeVastCamera::new(driver);
+    camera.connect(VastCameraID::StrID("fake-camera-0".to_string())).unwrap();
+    camera.set_sky_field_preset(FakeCameraSkyFieldPreset::FlatField);
+    camera.set_bayer_pattern(Some(CameraBayerPattern::RGGB));
+    camera.set_sensor_noise(0.0).unwrap();
+    camera
+        .set_camera_settings(crate::types::camera::VastCameraSettings {
+            exposure_microseconds: Some(500_000),
+            offset: Some(512),
+            roi: Some((0, 0, 32, 32)),
+            ..Default::default()
+        })
+        .unwrap();
+
+    camera.start_image_acquisition().unwrap();
+    let frame = camera.get_acquired_image(2_000).unwrap();
+    let samples = raw16_samples(&frame);
+
+    let mut red_total = 0_u64;
+    let mut green_total = 0_u64;
+    let mut blue_total = 0_u64;
+    let mut red_count = 0_u64;
+    let mut green_count = 0_u64;
+    let mut blue_count = 0_u64;
+
+    for y in 0..frame.height as usize {
+        for x in 0..frame.width as usize {
+            let sample = u64::from(samples[y * frame.width as usize + x]);
+            match (x & 1, y & 1) {
+                (0, 0) => {
+                    red_total += sample;
+                    red_count += 1;
+                }
+                (1, 1) => {
+                    blue_total += sample;
+                    blue_count += 1;
+                }
+                _ => {
+                    green_total += sample;
+                    green_count += 1;
+                }
+            }
+        }
+    }
+
+    let red_mean = red_total as f64 / red_count as f64;
+    let green_mean = green_total as f64 / green_count as f64;
+    let blue_mean = blue_total as f64 / blue_count as f64;
+
+    assert!(green_mean > red_mean, "expected green mean > red mean, red={red_mean} green={green_mean}");
+    assert!(green_mean > blue_mean, "expected green mean > blue mean, blue={blue_mean} green={green_mean}");
+}
+
+#[test]
+fn fake_camera_can_switch_from_color_to_mono_capabilities() {
+    let driver = Arc::new(FakeCameraDriver::new());
+    let mut camera = FakeVastCamera::new(driver);
+
+    assert_eq!(
+        camera.get_capabilities().bayer_pattern.as_ref().map(ToString::to_string),
+        Some("RGGB".to_string())
+    );
+
+    camera.set_bayer_pattern(None);
+
+    assert_eq!(camera.get_capabilities().bayer_pattern, None);
+    assert_eq!(camera.simulation_config().bayer_pattern, None);
 }
