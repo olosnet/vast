@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 
 use crate::{
     base::{connections::Connection, errors::VastResult},
-    types::common::EquatorialDegrees,
+    types::{common::EquatorialDegrees, imageformats::ImageHeaders},
 };
 
 /// Broad physical mount geometry.
@@ -272,6 +272,8 @@ pub trait VastMount {
     fn move_north(&mut self) -> VastResult<()>;
     /// Starts manual southward motion.
     fn move_south(&mut self) -> VastResult<()>;
+
+    fn populate_image_headers(&mut self, headers: &mut ImageHeaders) -> VastResult<()>;
 
     /// Disconnects mount.
     fn disconnect(&mut self) -> VastResult<()>;
